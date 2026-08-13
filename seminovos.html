@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Novos · Taiyo Honda</title>
+<title>Seminovos · Taiyo Honda</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -19,19 +19,19 @@
     </a>
     <nav class="nav">
       <a href="index.html">Início</a>
-      <a href="novos.html" aria-current="page">Novos</a>
+      <a href="novos.html">Novos</a>
       <a href="posvendas.html">Pós-Vendas</a>
-      <a href="seminovos.html">Seminovos</a>
+      <a href="seminovos.html" aria-current="page">Seminovos</a>
     </nav>
     <span class="topo-meta js-atualizado"></span>
   </div>
 </header>
 
 <main id="conteudo">
-  <h1 class="titulo-pagina">Veículos Novos</h1>
+  <h1 class="titulo-pagina">Seminovos</h1>
   <p class="subtitulo">
-    Mídia da conta <code>act_1667526963623142</code> cruzada com o funil <b>Novos</b> do Kommo.
-    Os leads que ficam parados em nutrição aparecem no card do Início.
+    Mídia da conta <code>act_1227886575905312</code> cruzada com o funil
+    <b>Seminovos</b> do Kommo.
   </p>
 
   <div class="filtros">
@@ -62,19 +62,19 @@
     <div class="grade">
       <div class="card meio">
         <h3>Funil comercial</h3>
-        <p class="dica">Leads que alcançaram cada etapa, <span class="js-periodo"></span>. Encaminhado, Visita/Test-Drive e Aguardando Faturamento são contados pela tag da automação do Kommo. À direita, quantos % da etapa anterior chegaram nesta.</p>
+        <p class="dica">Leads que alcançaram cada etapa, <span class="js-periodo"></span>. À direita, quantos % da etapa anterior chegaram nesta.</p>
         <div class="funil" id="funil"></div>
       </div>
 
       <div class="card meio">
         <h3>Leads recebidos por dia</h3>
-        <p class="dica">Volume de entrada no funil Novos.</p>
+        <p class="dica">Volume de entrada no funil Seminovos.</p>
         <div class="tela"><canvas id="g-leads-dia"></canvas></div>
       </div>
 
       <div class="card meio">
         <h3>Modelo de interesse</h3>
-        <p class="dica">Campo livre do Kommo, com a grafia normalizada (HR-V, hr-v e hrv viram um só).</p>
+        <p class="dica">Campo livre do Kommo, com a grafia normalizada.</p>
         <div class="tela"><canvas id="g-modelos"></canvas></div>
         <p class="vazio" id="sem-modelos" hidden>Nenhum lead com modelo preenchido no período.</p>
       </div>
@@ -112,7 +112,7 @@
 </main>
 
 <footer class="rodape">
-  Leads: Kommo CRM (funil Novos) · Investimento: Meta Ads <code>act_1667526963623142</code>.
+  Leads: Kommo CRM (funil Seminovos) · Investimento: Meta Ads <code>act_1227886575905312</code>.
   Dados agregados, sem informação pessoal. Atualização automática 2×/dia via GitHub Actions.
 </footer>
 
@@ -121,13 +121,14 @@
 <script src="assets/pagina.js"></script>
 <script>
 montarPagina({
-  pipeline: 'novos',
-  conta: 'novos',
-  contaId: 'act_1667526963623142',
+  pipeline: 'seminovos',
+  conta: 'seminovos',
+  contaId: 'act_1227886575905312',
   avisoSemVenda:
     '<b>Nenhuma venda registrada como “Ganho” neste funil no período.</b> ' +
-    'A venda de veículo novo não está sendo fechada no Kommo — os leads saem por Perdido ou ficam em Nutrição. ' +
-    'Enquanto isso não mudar, receita, ticket médio e CAC desta área ficam sem base e aparecem zerados.',
+    'A equipe informou vendas que não estão no Kommo — elas aparecem no card ' +
+    '“Vendas informadas”, separadas do que vem do CRM. Enquanto a venda não for ' +
+    'fechada no funil, receita, ticket e CAC de Seminovos ficam sem base.',
 });
 </script>
 </body>

@@ -1,0 +1,12 @@
+{
+  "_leia": "Vendas que aconteceram mas NAO estao registradas como Ganho no Kommo. Este arquivo e editado a mao — nenhum script o sobrescreve. O dashboard mostra estes numeros num card separado, rotulado como informado manualmente, e nunca soma ao que vem do CRM. A correcao de verdade e fechar a venda no funil do Kommo; isto aqui e so para a tela nao mentir enquanto isso nao acontece.",
+  "_como_editar": "Acrescente um objeto em vendas.<area> com data (AAAA-MM-DD) e, se souber, valor em reais. Sem valor, a venda conta no numero mas nao entra na receita.",
+  "vendas": {
+    "seminovos": [
+      { "data": "2026-08-01", "valor": null, "obs": "informada pela equipe — data aproximada, confirmar" },
+      { "data": "2026-08-01", "valor": null, "obs": "informada pela equipe — data aproximada, confirmar" }
+    ],
+    "novos": [],
+    "posvendas": []
+  }
+}

@@ -21,6 +21,7 @@
       <a href="index.html" aria-current="page">Início</a>
       <a href="novos.html">Novos</a>
       <a href="posvendas.html">Pós-Vendas</a>
+      <a href="seminovos.html">Seminovos</a>
     </nav>
     <span class="topo-meta js-atualizado"></span>
   </div>
@@ -101,6 +102,8 @@
     const nov = agrega('novos');
     const pos = agrega('posvendas');
     const nut = agrega('nutricao');
+    const sem = agrega('seminovos');
+    const gastoSem = midiaDoIntervalo(meta?.contas?.seminovos, periodo, kommo.inicio, d0, d1)?.gasto ?? null;
     const gastoNov = midiaDoIntervalo(meta?.contas?.novos, periodo, kommo.inicio, d0, d1)?.gasto ?? null;
 
     document.getElementById('hub').innerHTML = `
@@ -120,6 +123,15 @@
           <div class="hub-num"><div class="n">${fmt.int(pos.total)}</div><div class="r">Leads</div></div>
           <div class="hub-num"><div class="n">${fmt.int(pos.ganhos)}</div><div class="r">Ganhos</div></div>
           <div class="hub-num"><div class="n">${fmt.moedaCurta(pos.receita)}</div><div class="r">Receita</div></div>
+        </div>
+      </a>
+      <a class="hub-card" href="seminovos.html">
+        <h2>Seminovos</h2>
+        <p>Funil de seminovos e a conta de mídia da área.</p>
+        <div class="hub-nums">
+          <div class="hub-num"><div class="n">${fmt.int(sem.total)}</div><div class="r">Leads</div></div>
+          <div class="hub-num"><div class="n">${fmt.int(sem.ganhos)}</div><div class="r">Ganhos</div></div>
+          <div class="hub-num"><div class="n">${gastoSem === null ? '—' : fmt.moedaCurta(gastoSem)}</div><div class="r">Investido</div></div>
         </div>
       </a>`;
 

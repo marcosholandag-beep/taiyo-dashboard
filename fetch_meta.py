@@ -21,6 +21,7 @@ BRT = timezone(timedelta(hours=-3))
 CONTAS = {
     "novos": os.environ.get("META_ACCOUNT_NOVOS", "act_1667526963623142"),
     "posvendas": os.environ.get("META_ACCOUNT_POSVENDAS", "act_858960833896053"),
+    "seminovos": os.environ.get("META_ACCOUNT_SEMINOVOS", "act_1227886575905312"),
 }
 
 # acoes que contam como "resultado" para a Taiyo (CTWA + formulario)

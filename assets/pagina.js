@@ -6,9 +6,10 @@
 async function montarPagina(cfg) {
   iniciarTema();
 
-  const [kommo, meta] = await Promise.all([
+  const [kommo, meta, manual] = await Promise.all([
     carregarJSON('data/kommo.json'),
     carregarJSON('data/meta.json'),
+    carregarJSON('data/manual.json'),
   ]);
 
   if (!kommo) {
@@ -18,6 +19,7 @@ async function montarPagina(cfg) {
   }
 
   const regs = kommo.leads[cfg.pipeline] || [];
+  const vendasManuais = manual?.vendas?.[cfg.pipeline] || [];
   const etapas = kommo.etapas[cfg.pipeline] || [];
   const conta = meta?.contas?.[cfg.conta] || null;
   const metaParcial = meta?.fonte !== 'api';
@@ -37,6 +39,10 @@ async function montarPagina(cfg) {
     const m = midiaDoIntervalo(conta, periodo, kommo.inicio, d0, d1);
 
     document.querySelectorAll('.js-periodo').forEach(el => { el.textContent = rot; });
+
+    // vendas informadas a mao dentro do intervalo — nunca somadas ao CRM
+    const de = isoDoDia(d0, kommo.inicio), ate = isoDoDia(d1, kommo.inicio);
+    p.manuais = vendasManuais.filter(v => v.data >= de && v.data <= ate);
 
     pintarComercial(p, rot);
     pintarMidia(m, p, rot);
@@ -62,6 +68,11 @@ async function montarPagina(cfg) {
         nota: p.abertos ? fmt.pct(100 * p.estagnados / p.abertos) + ' dos abertos' : '—',
         tom: p.abertos && p.estagnados / p.abertos > 0.5 ? 'ruim' : null,
       }),
+      ...(p.manuais?.length ? [kpi({
+        rotulo: 'Vendas informadas',
+        valor: fmt.int(p.manuais.length),
+        nota: 'fora do CRM — informado pela equipe',
+      })] : []),
     ].join('');
 
     // aviso quando o funil nao registra venda
