@@ -145,25 +145,26 @@ def ranking(linhas, chave_id, chave_nome, n=12):
 
 
 def thumbs(ad_ids):
-    """Busca miniatura dos criativos (lotes de 40)."""
+    """
+    Busca a miniatura de cada criativo.
+
+    Uma chamada por anuncio: o parametro `ids` em lote foi descontinuado na
+    v26+ e a Graph API recusa mesmo quando a URL pede uma versao anterior.
+    """
     out = {}
-    ids = [i for i in ad_ids if i]
-    for i in range(0, len(ids), 40):
-        lote = ids[i:i + 40]
+    for ad_id in [i for i in ad_ids if i]:
         params = {
             "access_token": TOKEN,
-            "ids": ",".join(lote),
             "fields": "creative{thumbnail_url,image_url}",
         }
         try:
-            d = http_get(f"{API}/?" + urllib.parse.urlencode(params))
+            d = http_get(f"{API}/{ad_id}?" + urllib.parse.urlencode(params))
         except RuntimeError:
             continue
-        for ad_id, v in (d or {}).items():
-            cr = v.get("creative") or {}
-            url = cr.get("thumbnail_url") or cr.get("image_url")
-            if url:
-                out[ad_id] = url
+        cr = (d or {}).get("creative") or {}
+        url = cr.get("thumbnail_url") or cr.get("image_url")
+        if url:
+            out[ad_id] = url
     return out
 
 
