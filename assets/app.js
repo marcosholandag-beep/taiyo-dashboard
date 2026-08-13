@@ -179,23 +179,192 @@ function isoLocal(d) {
   return `${d.getFullYear()}-${mes}-${dia}`;
 }
 
-/**
- * Recorta a serie diaria. "N dias" inclui hoje e os N-1 anteriores — o mesmo
- * corte que fetch_kommo.py aplica, para o total do periodo bater com a soma
- * da serie.
- */
-function recorteSerie(serie, periodo) {
-  if (!serie || !serie.length) return [];
-  const hoje = new Date();
-  let corte;
-  if (periodo === 'mes') {
-    corte = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-  } else {
-    const dias = parseInt(periodo, 10) || 30;
-    corte = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - (dias - 1));
+
+/* ==========================================================================
+   Agregacao no navegador
+
+   data/kommo.json traz um registro por lead (sem PII). Todo numero da tela sai
+   daqui, para qualquer intervalo de datas — inclusive personalizado.
+
+   Campos do registro:
+     0 d dia   1 s estado(0 aberto,1 ganho,2 perdido)   2 a etapa maxima
+     3 t bitmask de tags de etapa   4 m modelo   5 u unidade   6 r motivo
+     7 o origem   8 p valor   9 utm   10 e estagnado
+   ========================================================================== */
+
+const R = { DIA: 0, EST: 1, AVANCO: 2, TAGS: 3, MODELO: 4, UNIDADE: 5, MOTIVO: 6, ORIGEM: 7, VALOR: 8, UTM: 9, PARADO: 10 };
+
+/** Converte "YYYY-MM-DD" no indice de dia usado nos registros. */
+function diaDe(iso, inicioISO) {
+  const [a, m, d] = iso.split('-').map(Number);
+  const [a0, m0, d0] = inicioISO.split('-').map(Number);
+  return Math.round((Date.UTC(a, m - 1, d) - Date.UTC(a0, m0 - 1, d0)) / 86400000);
+}
+
+function contarTop(mapa, dicionario, n, incluirVazio) {
+  const saida = [];
+  mapa.forEach((v, k) => {
+    if (k < 0) { if (incluirVazio) saida.push({ nome: '(não preenchido)', valor: v }); return; }
+    saida.push({ nome: dicionario[k], valor: v });
+  });
+  saida.sort((x, y) => y.valor - x.valor);
+  return saida.slice(0, n);
+}
+
+/** Agrega os leads de um funil dentro do intervalo [d0, d1] (indices de dia). */
+function agregar(regs, etapas, dic, d0, d1) {
+  const dentro = regs.filter(r => r[R.DIA] >= d0 && r[R.DIA] <= d1);
+
+  let ganhos = 0, perdidos = 0, receita = 0, estagnados = 0, comUtm = 0;
+  const cModelo = new Map(), cUnidade = new Map(), cMotivo = new Map(),
+        cOrigem = new Map(), cPerdaEtapa = new Map();
+  const inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+
+  for (const r of dentro) {
+    if (r[R.EST] === 1) { ganhos++; receita += r[R.VALOR]; }
+    else if (r[R.EST] === 2) {
+      perdidos++;
+      inc(cMotivo, r[R.MOTIVO]);
+      inc(cPerdaEtapa, r[R.AVANCO]);
+    }
+    if (r[R.PARADO]) estagnados++;
+    if (r[R.UTM]) comUtm++;
+    inc(cModelo, r[R.MODELO]);
+    inc(cUnidade, r[R.UNIDADE]);
+    inc(cOrigem, r[R.ORIGEM]);
   }
-  const iso = isoLocal(corte);
-  return serie.filter(p => (p.data || '') >= iso);
+
+  const total = dentro.length;
+  const abertos = total - ganhos - perdidos;
+
+  // funil: etapa com tag conta pela tag; as demais, pela etapa maxima alcancada
+  const funil = etapas.map((et, i) => {
+    const ultima = i === etapas.length - 1;
+    let alcancaram;
+    if (ultima) alcancaram = ganhos;
+    else if (et.tag) alcancaram = dentro.reduce((s, r) => s + ((r[R.TAGS] >> i) & 1), 0);
+    else alcancaram = dentro.reduce((s, r) => s + (r[R.AVANCO] >= i ? 1 : 0), 0);
+    return { nome: et.nome, alcancaram, fonte: et.tag ? 'tag' : 'status' };
+  });
+  // um funil nunca cresce de uma etapa para a seguinte
+  for (let i = funil.length - 2; i >= 0; i--) {
+    if (funil[i].alcancaram < funil[i + 1].alcancaram) funil[i].alcancaram = funil[i + 1].alcancaram;
+  }
+
+  const nomeEtapa = i => (i >= 0 && i < etapas.length ? etapas[i].nome : '(sem etapa registrada)');
+  const perdaEtapa = [];
+  cPerdaEtapa.forEach((v, k) => perdaEtapa.push({ nome: nomeEtapa(k), valor: v }));
+  perdaEtapa.sort((a, b) => b.valor - a.valor);
+
+  return {
+    total, ganhos, perdidos, abertos, estagnados, receita,
+    ticket_medio: ganhos ? receita / ganhos : 0,
+    taxa_conversao: total ? 100 * ganhos / total : 0,
+    taxa_perda: total ? 100 * perdidos / total : 0,
+    funil,
+    perda_por_etapa: perdaEtapa,
+    modelos: contarTop(cModelo, dic.modelos, 10, false),
+    unidades: contarTop(cUnidade, dic.unidades, 5, false),
+    motivos_perda: contarTop(cMotivo, dic.motivos, 8, true),
+    origens: contarTop(cOrigem, dic.origens, 8, true),
+    preenchimento: {
+      utm_campaign: comUtm,
+      modelo: total - (cModelo.get(-1) || 0),
+      unidade: total - (cUnidade.get(-1) || 0),
+      motivo_perda: perdidos - (cMotivo.get(-1) || 0),
+    },
+  };
+}
+
+/** Serie diaria de leads/ganhos/receita, para os graficos de linha. */
+function serieDiaria(regs, inicioISO, d0, d1) {
+  const base = new Date(inicioISO + 'T00:00:00');
+  const balde = new Map();
+  for (let d = d0; d <= d1; d++) balde.set(d, { leads: 0, ganhos: 0, receita: 0 });
+  for (const r of regs) {
+    const b = balde.get(r[R.DIA]);
+    if (!b) continue;
+    b.leads++;
+    if (r[R.EST] === 1) { b.ganhos++; b.receita += r[R.VALOR]; }
+  }
+  return [...balde.entries()].map(([d, v]) => {
+    const dt = new Date(base.getTime() + d * 86400000);
+    return { data: isoLocal(dt), ...v };
+  });
+}
+
+/** Intervalo [d0, d1] a partir do periodo escolhido. */
+function intervalo(periodo, inicioISO, personalizado) {
+  const hoje = new Date();
+  const hojeIdx = diaDe(isoLocal(hoje), inicioISO);
+  if (periodo === 'custom' && personalizado?.de && personalizado?.ate) {
+    return [diaDe(personalizado.de, inicioISO), diaDe(personalizado.ate, inicioISO)];
+  }
+  if (periodo === 'mes') {
+    const p = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    return [diaDe(isoLocal(p), inicioISO), hojeIdx];
+  }
+  const dias = parseInt(periodo, 10) || 30;
+  return [hojeIdx - (dias - 1), hojeIdx];
+}
+
+/** Data ISO a partir do indice de dia. */
+function isoDoDia(d, inicioISO) {
+  const base = new Date(inicioISO + 'T00:00:00');
+  return isoLocal(new Date(base.getTime() + d * 86400000));
+}
+
+const ROTULO_PERIODO = {
+  '7d': 'últimos 7 dias', '30d': 'últimos 30 dias',
+  '90d': 'últimos 90 dias', 'mes': 'mês corrente',
+};
+
+function rotuloPeriodo(periodo, custom) {
+  if (periodo === 'custom' && custom?.de && custom?.ate) {
+    const br = s => s.split('-').reverse().join('/');
+    return `${br(custom.de)} a ${br(custom.ate)}`;
+  }
+  return ROTULO_PERIODO[periodo] || periodo;
+}
+
+/** Recorta a serie diaria do Meta ao intervalo pedido. */
+function recorteMeta(serie, inicioISO, d0, d1) {
+  if (!serie || !serie.length) return [];
+  const de = isoDoDia(d0, inicioISO), ate = isoDoDia(d1, inicioISO);
+  return serie.filter(p => p.data >= de && p.data <= ate);
+}
+
+/**
+ * KPIs de midia para o intervalo.
+ *
+ * Os presets tem numeros exatos vindos da API. Para intervalo personalizado a
+ * soma sai da serie diaria; campanha e anuncio nao tem recorte proprio porque
+ * o Meta so entrega esse detalhe em janelas fixas — nesse caso mostramos o
+ * detalhe de 30 dias e avisamos na tela.
+ */
+function midiaDoIntervalo(conta, periodo, inicioISO, d0, d1) {
+  if (!conta || !conta.periodos) return null;
+  if (periodo !== 'custom') return conta.periodos[periodo] || null;
+
+  const s = recorteMeta(conta.serie, inicioISO, d0, d1);
+  if (!s.length) return null;
+  const soma = k => s.reduce((a, b) => a + (b[k] || 0), 0);
+  const gasto = soma('gasto'), impressoes = soma('impressoes'),
+        cliques = soma('cliques'), resultados = soma('resultados');
+  const trinta = conta.periodos['30d'] || {};
+  return {
+    gasto: Math.round(gasto * 100) / 100,
+    impressoes, cliques, resultados,
+    conversas: resultados, leads_form: 0,
+    alcance: 0,
+    ctr: impressoes ? Math.round(10000 * cliques / impressoes) / 100 : 0,
+    cpc: cliques ? Math.round(100 * gasto / cliques) / 100 : 0,
+    cpm: impressoes ? Math.round(100000 * gasto / impressoes) / 100 : 0,
+    cpr: resultados ? Math.round(100 * gasto / resultados) / 100 : 0,
+    campanhas: trinta.campanhas || [],
+    anuncios: trinta.anuncios || [],
+    detalheAproximado: true,
+  };
 }
 
 /* ---------- abas e filtros ---------- */
@@ -213,15 +382,40 @@ function iniciarAbas(aoTrocar) {
   });
 }
 
-function iniciarPeriodo(aoTrocar) {
+function iniciarPeriodo(aoTrocar, limites) {
   const barra = document.querySelector('.filtros');
   if (!barra) return;
+  const caixa = barra.querySelector('.intervalo');
+  const de = barra.querySelector('#data-de');
+  const ate = barra.querySelector('#data-ate');
+
+  if (de && ate && limites) {
+    de.min = ate.min = limites.min;
+    de.max = ate.max = limites.max;
+    de.value = limites.padraoDe;
+    ate.value = limites.max;
+  }
+
+  const marcar = alvo => barra.querySelectorAll('.chip').forEach(
+    x => x.setAttribute('aria-pressed', String(x === alvo)));
+
   barra.addEventListener('click', ev => {
     const c = ev.target.closest('.chip');
-    if (!c) return;
-    barra.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-pressed', String(x === c)));
-    aoTrocar(c.dataset.periodo);
+    if (c) {
+      marcar(c);
+      if (caixa) caixa.hidden = c.dataset.periodo !== 'custom';
+      if (c.dataset.periodo === 'custom') {
+        if (de.value && ate.value) aoTrocar('custom', { de: de.value, ate: ate.value });
+      } else {
+        aoTrocar(c.dataset.periodo, null);
+      }
+      return;
+    }
+    if (ev.target.closest('.btn-aplicar')) {
+      if (!de.value || !ate.value) return;
+      if (de.value > ate.value) { const v = de.value; de.value = ate.value; ate.value = v; }
+      aoTrocar('custom', { de: de.value, ate: ate.value });
+    }
   });
 }
 
-const ROTULO_PERIODO = { '7d': 'últimos 7 dias', '30d': 'últimos 30 dias', '90d': 'últimos 90 dias', 'mes': 'mês corrente' };

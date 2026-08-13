@@ -153,6 +153,7 @@ def baixar_historico(desde_ts):
     """
     hist = collections.defaultdict(set)
     pipes = collections.defaultdict(set)
+    origem = {}          # lead_id -> (timestamp do evento mais antigo, pipeline de origem)
     page = 1
     while True:
         url = (f"{BASE}/events?filter[type][]=lead_status_changed"
@@ -163,6 +164,7 @@ def baixar_historico(desde_ts):
             break
         for e in eventos:
             lid = e.get("entity_id")
+            ts = e.get("created_at") or 0
             for campo in ("value_before", "value_after"):
                 for v in (e.get(campo) or []):
                     st = (v or {}).get("lead_status") or {}
@@ -170,6 +172,11 @@ def baixar_historico(desde_ts):
                         hist[lid].add(st["id"])
                     if st.get("pipeline_id"):
                         pipes[lid].add(st["pipeline_id"])
+            # o value_before do evento mais antigo aponta onde o lead nasceu
+            for v in (e.get("value_before") or []):
+                pid = ((v or {}).get("lead_status") or {}).get("pipeline_id")
+                if pid and (lid not in origem or ts < origem[lid][0]):
+                    origem[lid] = (ts, pid)
         if page % 20 == 0:
             print(f"  historico: {page} paginas, {len(hist)} leads")
         if not ((d.get("_links") or {}).get("next")):
@@ -178,7 +185,7 @@ def baixar_historico(desde_ts):
         if page > 400:
             print("  [aviso] limite de 400 paginas de historico atingido")
             break
-    return hist, pipes
+    return hist, pipes, origem
 
 
 def baixar_leads(desde_ts):
@@ -253,167 +260,103 @@ def top(counter, n=12, rotulo_vazio=None):
     return [{"nome": k, "valor": v} for k, v in itens[:n]]
 
 
-def agrega_periodo(leads, funil_ids, hist):
-    """Recebe os leads de um pipeline ja filtrados por periodo."""
-    total = len(leads)
-    ganhos = [l for l in leads if l["status_id"] == 142]
-    perdidos = [l for l in leads if l["status_id"] == 143]
-    abertos = [l for l in leads if l["status_id"] not in (142, 143)]
-    receita = sum(l.get("price") or 0 for l in ganhos)
 
-    # --- funil ---
-    # Para cada lead, a etapa mais avancada que ele alcancou, juntando o
-    # historico de mudancas de status ao status atual. Ganho conta como
-    # "alem da ultima etapa".
+
+# ---------------------------------------------------------------------------
+# Emissao granular
+#
+# O arquivo publica UM REGISTRO POR LEAD, sem PII, e o navegador agrega o
+# periodo que o usuario escolher — inclusive intervalo personalizado. Antes os
+# recortes 7/30/90 vinham prontos do Python e nenhum outro intervalo era
+# possivel.
+#
+# Campos do registro, nesta ordem:
+#   0 d   dia (inteiro, dias desde `inicio`)
+#   1 s   0 = aberto, 1 = ganho, 2 = perdido
+#   2 a   indice da etapa mais avancada alcancada (-1 = nenhuma)
+#   3 t   bitmask das etapas cuja tag de automacao esta no lead
+#   4 m   indice do modelo de interesse (-1 = vazio)
+#   5 u   indice da unidade (-1 = vazio)
+#   6 r   indice do motivo de perda (-1 = vazio)
+#   7 o   indice da origem
+#   8 p   valor da venda, 0 se nao ganho
+#   9 utm 1 se tem utm_campaign ou o campo Campanha preenchido
+#  10 e   1 se esta aberto e sem movimentacao ha mais de 7 dias
+# ---------------------------------------------------------------------------
+
+class Dicionario:
+    """Interna strings repetidas: o JSON guarda indices, nao o texto todo."""
+
+    def __init__(self):
+        self.itens = []
+        self._pos = {}
+
+    def idx(self, valor):
+        if valor is None:
+            return -1
+        if valor not in self._pos:
+            self._pos[valor] = len(self.itens)
+            self.itens.append(valor)
+        return self._pos[valor]
+
+
+def origem_do_lead(lead):
+    """utm_source quando existe; senao deduz da tag de anuncio."""
+    origem = cf_valor(lead, CF["utm_source"])
+    if origem:
+        return origem
+    ts = tags(lead)
+    if any(t.startswith("fb") and t[2:].isdigit() for t in ts):
+        return "Meta Ads (CTWA)"
+    if any("meta" in t.lower() or "patrocinado" in t.lower() for t in ts):
+        return "Meta Ads (tag)"
+    if any("reativado" in t.lower() for t in ts):
+        return "Reativacao"
+    return "(nao identificado)"
+
+
+def monta_registros(leads, funil_ids, hist, dia_zero, dicts):
     pos = {sid: i for i, sid in enumerate(funil_ids)}
     ultimo = len(funil_ids)
+    corte_estagnado = int(time.time()) - 7 * 86400
 
-    def etapa_maxima(lead):
-        idx = [pos[s] for s in hist.get(lead["id"], ()) if s in pos]
-        atual = lead["status_id"]
+    # bit de cada etapa que tem tag de automacao
+    bits = {i: TAG_ETAPA[sid] for i, sid in enumerate(funil_ids) if sid in TAG_ETAPA}
+
+    regs = []
+    for l in leads:
+        atual = l["status_id"]
+
+        idx = [pos[s] for s in hist.get(l["id"], ()) if s in pos]
         if atual in pos:
             idx.append(pos[atual])
         elif atual == 142:
             idx.append(ultimo)
-        return max(idx) if idx else -1
+        avanco = max(idx) if idx else -1
 
-    avanco = {l["id"]: etapa_maxima(l) for l in leads}
+        marcas = set(tags(l))
+        t = 0
+        for i, nome_tag in bits.items():
+            if nome_tag in marcas:
+                t |= (1 << i)
 
-    etapas = []
-    for i, sid in enumerate(funil_ids):
-        tag = TAG_ETAPA.get(sid)
-        if tag:
-            alcancaram = sum(1 for l in leads if tag in tags(l))
-        else:
-            alcancaram = sum(1 for l in leads if avanco[l["id"]] >= i)
-        etapas.append({
-            "id": sid,
-            "nome": STATUS_NOMES.get(sid, str(sid)),
-            "parados": sum(1 for l in leads if l["status_id"] == sid),
-            "alcancaram": alcancaram,
-            "fonte": "tag" if tag else "status",
-        })
-    etapas.append({"id": 142, "nome": "Ganho", "parados": len(ganhos),
-                   "alcancaram": len(ganhos), "fonte": "status"})
+        s = 1 if atual == 142 else (2 if atual == 143 else 0)
+        dia = (datetime.fromtimestamp(l["created_at"], BRT).date() - dia_zero).days
 
-    # Um funil nao pode crescer: se uma etapa contada por tag ficar acima da
-    # anterior (lead que ganhou a tag sem passar pelo status intermediario),
-    # a etapa anterior absorve o valor, senao a barra fica maior que a de cima.
-    for i in range(len(etapas) - 2, -1, -1):
-        if etapas[i]["alcancaram"] < etapas[i + 1]["alcancaram"]:
-            etapas[i]["alcancaram"] = etapas[i + 1]["alcancaram"]
-
-    # onde os leads perdidos pararam
-    perda_etapa = collections.Counter()
-    for l in perdidos:
-        i = avanco[l["id"]]
-        perda_etapa[STATUS_NOMES.get(funil_ids[i], "?") if 0 <= i < len(funil_ids)
-                    else "(sem etapa registrada)"] += 1
-
-    # --- quebras ---
-    c_vendedor = collections.Counter()
-    c_vendedor_ganho = collections.Counter()
-    v_vendedor_receita = collections.Counter()
-    c_modelo = collections.Counter()
-    c_unidade = collections.Counter()
-    c_motivo = collections.Counter()
-    c_campanha = collections.Counter()
-    c_origem = collections.Counter()
-    c_anuncio = collections.Counter()
-    c_setor = collections.Counter()
-
-    for l in leads:
-        vend = cf_valor(l, CF["vendedor"]) or "(nao preenchido)"
-        c_vendedor[vend] += 1
-        if l["status_id"] == 142:
-            c_vendedor_ganho[vend] += 1
-            v_vendedor_receita[vend] += l.get("price") or 0
-
-        c_modelo[normaliza_modelo(cf_valor(l, CF["modelo"])) or "(nao preenchido)"] += 1
-        c_unidade[cf_valor(l, CF["unidade"]) or "(nao preenchido)"] += 1
-        c_setor[cf_valor(l, CF["setor"]) or "(nao preenchido)"] += 1
-
-        camp = cf_valor(l, CF["utm_campaign"]) or cf_valor(l, CF["campanha"])
-        c_campanha[camp or "(nao preenchido)"] += 1
-
-        origem = cf_valor(l, CF["utm_source"])
-        if not origem:
-            ts = tags(l)
-            if any(t.startswith("fb") and t[2:].isdigit() for t in ts):
-                origem = "Meta Ads (CTWA)"
-            elif any("meta" in t.lower() or "patrocinado" in t.lower() for t in ts):
-                origem = "Meta Ads (tag)"
-            elif any("reativado" in t.lower() for t in ts):
-                origem = "Reativacao"
-            else:
-                origem = "(nao identificado)"
-        c_origem[origem] += 1
-
-        for t in tags(l):
-            if t.startswith("fb") and t[2:].isdigit():
-                c_anuncio[t[2:]] += 1
-
-        if l["status_id"] == 143:
-            c_motivo[motivo_perda(l) or "(sem motivo informado)"] += 1
-
-    # ranking de vendedores com ganho e receita juntos
-    vendedores = []
-    for nome, qtd in c_vendedor.most_common(15):
-        if nome == "(nao preenchido)":
-            continue
-        vendedores.append({
-            "nome": nome,
-            "leads": qtd,
-            "ganhos": c_vendedor_ganho.get(nome, 0),
-            "receita": v_vendedor_receita.get(nome, 0),
-            "conversao": round(100 * c_vendedor_ganho.get(nome, 0) / qtd, 1) if qtd else 0,
-        })
-
-    # leads abertos parados ha mais de 7 dias
-    corte = int(time.time()) - 7 * 86400
-    estagnados = sum(1 for l in abertos if (l.get("updated_at") or 0) < corte)
-
-    return {
-        "total": total,
-        "ganhos": len(ganhos),
-        "perdidos": len(perdidos),
-        "abertos": len(abertos),
-        "estagnados": estagnados,
-        "receita": receita,
-        "ticket_medio": round(receita / len(ganhos), 2) if ganhos else 0,
-        "taxa_conversao": round(100 * len(ganhos) / total, 2) if total else 0,
-        "taxa_perda": round(100 * len(perdidos) / total, 2) if total else 0,
-        "funil": etapas,
-        "perda_por_etapa": top(perda_etapa, 10, rotulo_vazio=True),
-        "vendedores": vendedores,
-        "modelos": top(c_modelo, 10),
-        "unidades": top(c_unidade, 5),
-        "setores": top(c_setor, 8),
-        "motivos_perda": top(c_motivo, 8, rotulo_vazio=True),
-        "campanhas": top(c_campanha, 10),
-        "origens": top(c_origem, 8, rotulo_vazio=True),
-        "anuncios": [{"ad_id": k, "valor": v} for k, v in c_anuncio.most_common(15)],
-        "preenchimento": {
-            "utm_campaign": total - c_campanha.get("(nao preenchido)", 0),
-            "vendedor": total - c_vendedor.get("(nao preenchido)", 0),
-            "modelo": total - c_modelo.get("(nao preenchido)", 0),
-            "unidade": total - c_unidade.get("(nao preenchido)", 0),
-            "motivo_perda": len(perdidos) - c_motivo.get("(sem motivo informado)", 0),
-        },
-    }
-
-
-def serie_diaria(leads):
-    dias = collections.defaultdict(lambda: {"leads": 0, "ganhos": 0, "perdidos": 0, "receita": 0})
-    for l in leads:
-        d = datetime.fromtimestamp(l["created_at"], BRT).strftime("%Y-%m-%d")
-        dias[d]["leads"] += 1
-        if l["status_id"] == 142:
-            dias[d]["ganhos"] += 1
-            dias[d]["receita"] += l.get("price") or 0
-        elif l["status_id"] == 143:
-            dias[d]["perdidos"] += 1
-    return [{"data": k, **v} for k, v in sorted(dias.items())]
+        regs.append([
+            dia,
+            s,
+            avanco,
+            t,
+            dicts["modelos"].idx(normaliza_modelo(cf_valor(l, CF["modelo"]))),
+            dicts["unidades"].idx(cf_valor(l, CF["unidade"])),
+            dicts["motivos"].idx(motivo_perda(l) if s == 2 else None),
+            dicts["origens"].idx(origem_do_lead(l)),
+            int(l.get("price") or 0) if s == 1 else 0,
+            1 if (cf_valor(l, CF["utm_campaign"]) or cf_valor(l, CF["campanha"])) else 0,
+            1 if (s == 0 and (l.get("updated_at") or 0) < corte_estagnado) else 0,
+        ])
+    return regs
 
 
 def main():
@@ -422,53 +365,43 @@ def main():
 
     agora = datetime.now(BRT)
     desde = int((agora - timedelta(days=DIAS_HISTORICO)).timestamp())
+    dia_zero = (agora - timedelta(days=DIAS_HISTORICO)).date()
 
     print(f"Baixando leads criados nos ultimos {DIAS_HISTORICO} dias...")
     leads = baixar_leads(desde)
     print(f"Total: {len(leads)} leads")
 
-    # o funil so precisa de historico do maior periodo exibido (90 dias)
-    print("Baixando historico de mudancas de status (90 dias)...")
-    hist, pipes = baixar_historico(int((agora - timedelta(days=90)).timestamp()))
+    print("Baixando historico de mudancas de status (180 dias)...")
+    hist, pipes, origem = baixar_historico(desde)
     print(f"Historico: {len(hist)} leads com mudanca de etapa registrada")
 
-    # Os cortes sao alinhados ao inicio do dia (BRT) e "N dias" inclui hoje,
-    # exatamente como recorteSerie() faz no front — senao o total do periodo
-    # nao bate com a soma da serie diaria no mesmo periodo.
-    def inicio_do_dia(d):
-        return d.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    periodos = {
-        "7d": int(inicio_do_dia(agora - timedelta(days=6)).timestamp()),
-        "30d": int(inicio_do_dia(agora - timedelta(days=29)).timestamp()),
-        "90d": int(inicio_do_dia(agora - timedelta(days=89)).timestamp()),
-        "mes": int(inicio_do_dia(agora.replace(day=1)).timestamp()),
-    }
+    dicts = {k: Dicionario() for k in ("modelos", "unidades", "motivos", "origens")}
 
     saida = {
         "atualizado_em": agora.strftime("%d/%m/%Y %H:%M"),
+        "inicio": dia_zero.isoformat(),
         "dias_historico": DIAS_HISTORICO,
-        "pipelines": {},
+        "etapas": {},
+        "leads": {},
     }
 
     for pid, chave in PIPELINES.items():
-        # Um lead pertence ao funil se esta nele agora OU se ja esteve.
-        # Sem isso, o lead que foi encaminhado e depois movido para Nutricao
-        # sumia das etapas por onde comprovadamente passou.
-        do_pipe = [l for l in leads
-                   if l.get("pipeline_id") == pid or pid in pipes.get(l["id"], ())]
-        bloco = {
-            "id": pid,
-            "serie": serie_diaria(do_pipe),
-            "periodos": {},
-        }
-        for nome, ts in periodos.items():
-            recorte = [l for l in do_pipe if l["created_at"] >= ts]
-            bloco["periodos"][nome] = agrega_periodo(recorte, FUNIL[chave], hist)
-        saida["pipelines"][chave] = bloco
-        p30 = bloco["periodos"]["30d"]
-        print(f"  {chave}: {len(do_pipe)} leads ({DIAS_HISTORICO}d) | "
-              f"30d: {p30['total']} leads, {p30['ganhos']} ganhos, R$ {p30['receita']:,.0f}")
+        # Mesma definicao que o CRM usa na tela: leads criados no periodo que
+        # estao NESTE funil. Contar tambem quem passou por aqui e hoje esta em
+        # Nutricao inflava o numero e nao batia com o que a equipe ve no Kommo.
+        do_pipe = [l for l in leads if l.get("pipeline_id") == pid]
+        funil_ids = FUNIL[chave]
+
+        saida["etapas"][chave] = [
+            {"nome": STATUS_NOMES.get(sid, str(sid)),
+             "tag": TAG_ETAPA.get(sid)}
+            for sid in funil_ids
+        ] + [{"nome": "Ganho", "tag": None}]
+
+        saida["leads"][chave] = monta_registros(do_pipe, funil_ids, hist, dia_zero, dicts)
+        print(f"  {chave}: {len(do_pipe)} leads criados neste funil")
+
+    saida["dic"] = {k: d.itens for k, d in dicts.items()}
 
     os.makedirs("data", exist_ok=True)
     with open("data/kommo.json", "w", encoding="utf-8") as f:

@@ -30,7 +30,7 @@
   <h1 class="titulo-pagina">Visão geral</h1>
   <p class="subtitulo">
     Mídia do Meta Ads e funil do Kommo, separados por área. Cada área tem uma aba
-    <b>Comercial</b> e uma aba <b>Mídia</b>.
+    <b>CRM</b> e uma aba <b>Mídia</b>.
   </p>
 
   <div class="filtros">
@@ -39,6 +39,13 @@
     <button class="chip" type="button" data-periodo="30d" aria-pressed="true">30 dias</button>
     <button class="chip" type="button" data-periodo="90d" aria-pressed="false">90 dias</button>
     <button class="chip" type="button" data-periodo="mes" aria-pressed="false">Mês corrente</button>
+    <button class="chip" type="button" data-periodo="custom" aria-pressed="false">Personalizado</button>
+    <span class="intervalo" hidden>
+      <input type="date" id="data-de" aria-label="Data inicial">
+      <span class="intervalo-ate">até</span>
+      <input type="date" id="data-ate" aria-label="Data final">
+      <button class="btn-aplicar" type="button">Aplicar</button>
+    </span>
   </div>
 
   <div class="hub" id="hub"></div>
@@ -81,16 +88,20 @@
   });
 
   let periodo = '30d';
+  let custom = null;
+
+  const agrega = ch => agregar(kommo.leads[ch] || [], kommo.etapas[ch] || [], kommo.dic, d0, d1);
+  let d0 = 0, d1 = 0;
 
   function pintar() {
-    const rot = ROTULO_PERIODO[periodo];
+    [d0, d1] = intervalo(periodo, kommo.inicio, custom);
+    const rot = rotuloPeriodo(periodo, custom);
     document.querySelectorAll('.js-periodo').forEach(el => { el.textContent = rot; });
 
-    const nov = kommo.pipelines.novos.periodos[periodo];
-    const pos = kommo.pipelines.posvendas.periodos[periodo];
-    const nut = kommo.pipelines.nutricao.periodos[periodo];
-    const gastoPos = meta?.contas?.posvendas?.periodos?.[periodo]?.gasto ?? null;
-    const gastoNov = meta?.contas?.novos?.periodos?.[periodo]?.gasto ?? null;
+    const nov = agrega('novos');
+    const pos = agrega('posvendas');
+    const nut = agrega('nutricao');
+    const gastoNov = midiaDoIntervalo(meta?.contas?.novos, periodo, kommo.inicio, d0, d1)?.gasto ?? null;
 
     document.getElementById('hub').innerHTML = `
       <a class="hub-card" href="novos.html">
@@ -113,11 +124,11 @@
       </a>`;
 
     // ---- grafico geral: 3 series categoricas (slots 1, 2, 3) ----
-    const serieDe = ch => recorteSerie(kommo.pipelines[ch].serie, periodo);
-    const sn = serieDe('novos'), sp = serieDe('posvendas'), su = serieDe('nutricao');
-    const dias = [...new Set([...sn, ...sp, ...su].map(d => d.data))].sort();
+    const sn = serieDiaria(kommo.leads.novos || [], kommo.inicio, d0, d1);
+    const sp = serieDiaria(kommo.leads.posvendas || [], kommo.inicio, d0, d1);
+    const dias = sn.map(x => x.data);
     const mapa = s => { const m = {}; s.forEach(d => m[d.data] = d.leads); return m; };
-    const mn = mapa(sn), mp = mapa(sp), mu = mapa(su);
+    const mn = mapa(sn), mp = mapa(sp);
 
     const series = [
       { nome: 'Novos', dados: dias.map(d => mn[d] || 0), cor: cor('series-1') },
@@ -175,7 +186,11 @@
     ).join('');
   }
 
-  iniciarPeriodo(novo => { periodo = novo; pintar(); });
+  iniciarPeriodo((novo, faixa) => { periodo = novo; custom = faixa; pintar(); }, {
+    min: kommo.inicio,
+    max: isoLocal(new Date()),
+    padraoDe: isoDoDia(intervalo('30d', kommo.inicio, null)[0], kommo.inicio),
+  });
   document.addEventListener('tema-mudou', () => setTimeout(pintar, 40));
   pintar();
 })();

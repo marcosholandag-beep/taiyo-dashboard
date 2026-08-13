@@ -39,10 +39,17 @@
     <button class="chip" type="button" data-periodo="30d" aria-pressed="true">30 dias</button>
     <button class="chip" type="button" data-periodo="90d" aria-pressed="false">90 dias</button>
     <button class="chip" type="button" data-periodo="mes" aria-pressed="false">Mês corrente</button>
+    <button class="chip" type="button" data-periodo="custom" aria-pressed="false">Personalizado</button>
+    <span class="intervalo" hidden>
+      <input type="date" id="data-de" aria-label="Data inicial">
+      <span class="intervalo-ate">até</span>
+      <input type="date" id="data-ate" aria-label="Data final">
+      <button class="btn-aplicar" type="button">Aplicar</button>
+    </span>
   </div>
 
   <div class="abas" role="tablist">
-    <button class="aba" role="tab" data-painel="painel-comercial" aria-selected="true">Comercial</button>
+    <button class="aba" role="tab" data-painel="painel-comercial" aria-selected="true">CRM</button>
     <button class="aba" role="tab" data-painel="painel-midia" aria-selected="false">Mídia</button>
   </div>
 

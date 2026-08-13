@@ -17,7 +17,8 @@ async function montarPagina(cfg) {
     return;
   }
 
-  const pipe = kommo.pipelines[cfg.pipeline];
+  const regs = kommo.leads[cfg.pipeline] || [];
+  const etapas = kommo.etapas[cfg.pipeline] || [];
   const conta = meta?.contas?.[cfg.conta] || null;
   const metaParcial = meta?.fonte !== 'api';
 
@@ -26,11 +27,14 @@ async function montarPagina(cfg) {
   });
 
   let periodo = '30d';
+  let custom = null;
+  let d0 = 0, d1 = 0;
 
   function pintar() {
-    const p = pipe.periodos[periodo];
-    const m = conta?.periodos?.[periodo] || null;
-    const rot = ROTULO_PERIODO[periodo];
+    [d0, d1] = intervalo(periodo, kommo.inicio, custom);
+    const p = agregar(regs, etapas, kommo.dic, d0, d1);
+    const rot = rotuloPeriodo(periodo, custom);
+    const m = midiaDoIntervalo(conta, periodo, kommo.inicio, d0, d1);
 
     document.querySelectorAll('.js-periodo').forEach(el => { el.textContent = rot; });
 
@@ -68,7 +72,7 @@ async function montarPagina(cfg) {
 
     renderFunil(document.getElementById('funil'), p.funil);
 
-    const serie = recorteSerie(pipe.serie, periodo);
+    const serie = serieDiaria(regs, kommo.inicio, d0, d1);
     desenhar('g-leads-dia', ctx => new Chart(ctx, {
       type: 'line',
       data: {
@@ -144,7 +148,6 @@ async function montarPagina(cfg) {
     // qualidade de preenchimento do CRM
     const pr = p.preenchimento;
     const linhas = [
-      { campo: 'UTM / Campanha', ok: pr.utm_campaign, de: p.total },
       { campo: 'Modelo de interesse', ok: pr.modelo, de: p.total },
       { campo: 'Unidade', ok: pr.unidade, de: p.total },
       { campo: 'Motivo da perda', ok: pr.motivo_perda, de: p.perdidos },
@@ -201,7 +204,9 @@ async function montarPagina(cfg) {
         </div>
         <div class="card">
           <h3>Campanhas</h3>
-          <p class="dica">Ordenado por investimento. CPR = custo por resultado.</p>
+          <p class="dica">${m.detalheAproximado
+            ? 'O Meta só entrega o detalhe por campanha em janelas fixas — a tabela abaixo é a dos últimos 30 dias, não do intervalo escolhido.'
+            : 'Ordenado por investimento. CPR = custo por resultado.'}</p>
           <div id="t-campanhas"></div>
         </div>
         <div class="card">
@@ -233,7 +238,7 @@ async function montarPagina(cfg) {
       kpi({ rotulo: 'CPM', valor: fmt.moeda(m.cpm), nota: 'CPC ' + fmt.moeda(m.cpc) }),
     ].join('');
 
-    const s = recorteSerie(conta.serie, periodo);
+    const s = recorteMeta(conta.serie, kommo.inicio, d0, d1);
     if (s.length) {
       desenhar('g-gasto-dia', ctx => new Chart(ctx, {
         type: 'bar',
@@ -303,7 +308,11 @@ async function montarPagina(cfg) {
   }
 
   iniciarAbas(() => document.dispatchEvent(new CustomEvent('redesenhar')));
-  iniciarPeriodo(novo => { periodo = novo; pintar(); });
+  iniciarPeriodo((novo, faixa) => { periodo = novo; custom = faixa; pintar(); }, {
+    min: kommo.inicio,
+    max: isoLocal(new Date()),
+    padraoDe: isoDoDia(intervalo('30d', kommo.inicio, null)[0], kommo.inicio),
+  });
   document.addEventListener('redesenhar', () => {
     // Chart.js precisa remedir quando o painel sai de hidden
     setTimeout(() => graficos.forEach(g => g.resize()), 20);
