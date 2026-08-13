@@ -96,27 +96,58 @@ function vazio(msg) {
 }
 
 /**
- * Funil em HTML (nao e um grafico Chart.js — barras ancoradas a esquerda,
- * rampa ordinal, rotulo direto em cada etapa, queda percentual entre etapas).
+ * Funil como piramide invertida.
+ *
+ * Cada etapa e um trapezio cuja largura no topo e a da etapa anterior e na
+ * base e a da propria etapa, entao o estreitamento desenha a perda. Desenhado
+ * em SVG (trapezio nao sai de um <div>), com nome a esquerda e numero a
+ * direita em colunas HTML alinhadas pela mesma altura de linha.
  */
 function renderFunil(el, etapas) {
   if (!el) return;
+
+  const ALT = 46;          // altura de cada faixa
+  const VAO = 3;           // respiro entre faixas
+  const L = 300;           // largura do viewBox
+  const MIN = 26;          // largura minima para a faixa nao sumir
   const base = Math.max(...etapas.map(e => e.alcancaram), 1);
-  el.innerHTML = etapas.map((e, i) => {
-    const larg = Math.max(0.6, 100 * e.alcancaram / base);
-    const ant = i > 0 ? etapas[i - 1].alcancaram : null;
-    const queda = ant && ant > 0 ? 100 * (ant - e.alcancaram) / ant : null;
-    return `<div class="funil-linha">
-      <div class="funil-barra-wrap">
-        <div class="funil-barra" style="width:${larg}%;background:${ORDINAL(i)}"></div>
-        <span class="funil-rotulo">${e.nome}</span>
-      </div>
-      <div class="funil-num">
-        <b>${fmt.int(e.alcancaram)}</b>
-        ${queda !== null && queda > 0.5 ? `<span class="funil-queda">−${queda.toFixed(0)}%</span>` : ''}
-      </div>
+
+  const larg = v => Math.max(MIN, L * (v / base));
+  const alturaTotal = etapas.length * ALT;
+
+  const faixas = etapas.map((e, i) => {
+    const topo = i === 0 ? L : larg(etapas[i - 1].alcancaram);
+    const baixo = larg(e.alcancaram);
+    const y = i * ALT;
+    const y2 = y + ALT - VAO;
+    const p = [
+      [(L - topo) / 2, y], [(L + topo) / 2, y],
+      [(L + baixo) / 2, y2], [(L - baixo) / 2, y2],
+    ].map(c => c.join(',')).join(' ');
+    return `<polygon points="${p}" fill="${ORDINAL(i)}"></polygon>`;
+  }).join('');
+
+  const nomes = etapas.map(e =>
+    `<div class="funil-cel funil-nome" style="height:${ALT}px">${e.nome}</div>`).join('');
+
+  // A direita fica a taxa de passagem: quantos % da etapa anterior chegaram
+  // aqui. E a leitura neutra — mede avanco, nao perda.
+  const nums = etapas.map((e, i) => {
+    const ant = i > 0 ? etapas[i - 1].alcancaram : 0;
+    const passou = i > 0 && ant > 0 ? 100 * e.alcancaram / ant : null;
+    return `<div class="funil-cel funil-num" style="height:${ALT}px">
+      <b>${fmt.int(e.alcancaram)}</b>
+      ${passou !== null ? `<span class="funil-taxa">${passou.toFixed(0)}%</span>` : ''}
     </div>`;
   }).join('');
+
+  el.innerHTML = `
+    <div class="funil-grade">
+      <div class="funil-col">${nomes}</div>
+      <svg class="funil-svg" viewBox="0 0 ${L} ${alturaTotal}"
+           preserveAspectRatio="none" height="${alturaTotal}" aria-hidden="true">${faixas}</svg>
+      <div class="funil-col">${nums}</div>
+    </div>`;
 }
 
 /** Tabela simples a partir de colunas declaradas. */

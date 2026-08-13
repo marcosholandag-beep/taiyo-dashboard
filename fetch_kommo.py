@@ -152,6 +152,7 @@ def baixar_historico(desde_ts):
     das etapas 1 e 2, e o topo do funil ficaria menor que o total de leads.
     """
     hist = collections.defaultdict(set)
+    pipes = collections.defaultdict(set)
     page = 1
     while True:
         url = (f"{BASE}/events?filter[type][]=lead_status_changed"
@@ -164,9 +165,11 @@ def baixar_historico(desde_ts):
             lid = e.get("entity_id")
             for campo in ("value_before", "value_after"):
                 for v in (e.get(campo) or []):
-                    sid = ((v or {}).get("lead_status") or {}).get("id")
-                    if sid:
-                        hist[lid].add(sid)
+                    st = (v or {}).get("lead_status") or {}
+                    if st.get("id"):
+                        hist[lid].add(st["id"])
+                    if st.get("pipeline_id"):
+                        pipes[lid].add(st["pipeline_id"])
         if page % 20 == 0:
             print(f"  historico: {page} paginas, {len(hist)} leads")
         if not ((d.get("_links") or {}).get("next")):
@@ -175,7 +178,7 @@ def baixar_historico(desde_ts):
         if page > 400:
             print("  [aviso] limite de 400 paginas de historico atingido")
             break
-    return hist
+    return hist, pipes
 
 
 def baixar_leads(desde_ts):
@@ -426,7 +429,7 @@ def main():
 
     # o funil so precisa de historico do maior periodo exibido (90 dias)
     print("Baixando historico de mudancas de status (90 dias)...")
-    hist = baixar_historico(int((agora - timedelta(days=90)).timestamp()))
+    hist, pipes = baixar_historico(int((agora - timedelta(days=90)).timestamp()))
     print(f"Historico: {len(hist)} leads com mudanca de etapa registrada")
 
     # Os cortes sao alinhados ao inicio do dia (BRT) e "N dias" inclui hoje,
@@ -449,7 +452,11 @@ def main():
     }
 
     for pid, chave in PIPELINES.items():
-        do_pipe = [l for l in leads if l.get("pipeline_id") == pid]
+        # Um lead pertence ao funil se esta nele agora OU se ja esteve.
+        # Sem isso, o lead que foi encaminhado e depois movido para Nutricao
+        # sumia das etapas por onde comprovadamente passou.
+        do_pipe = [l for l in leads
+                   if l.get("pipeline_id") == pid or pid in pipes.get(l["id"], ())]
         bloco = {
             "id": pid,
             "serie": serie_diaria(do_pipe),

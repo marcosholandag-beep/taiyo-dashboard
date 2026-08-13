@@ -46,8 +46,8 @@
   <div class="secao-titulo">Entrada de leads por dia</div>
   <div class="grade">
     <div class="card">
-      <h3>Novos vs. Pós-Vendas vs. Nutrição</h3>
-      <p class="dica">Leads criados por dia em cada funil do Kommo, <span class="js-periodo"></span>.</p>
+      <h3>Novos vs. Pós-Vendas</h3>
+      <p class="dica">Leads que entraram em cada funil por dia, <span class="js-periodo"></span>. Nutrição não aparece separada porque quase todo lead dela passou antes por Novos — já está contado ali.</p>
       <div class="tela alta"><canvas id="g-geral"></canvas></div>
       <div class="legenda" id="legenda-geral"></div>
     </div>
@@ -122,7 +122,6 @@
     const series = [
       { nome: 'Novos', dados: dias.map(d => mn[d] || 0), cor: cor('series-1') },
       { nome: 'Pós-Vendas', dados: dias.map(d => mp[d] || 0), cor: cor('series-2') },
-      { nome: 'Nutrição', dados: dias.map(d => mu[d] || 0), cor: cor('series-3') },
     ];
 
     desenhar('g-geral', ctx => new Chart(ctx, {
@@ -156,7 +155,7 @@
       itens.push(['grave', '⚠', `<b>Nenhuma venda de veículo novo registrada no Kommo</b> — ${fmt.int(nov.total)} leads entraram e ${fmt.int(nov.perdidos)} saíram como perdidos, mas o funil Novos não registrou nenhum Ganho. Receita, ticket e CAC de Novos ficam sem base até a venda ser fechada no CRM.`]);
     }
     if (nut.abertos > 0) {
-      itens.push(['alerta', '📥', `<b>${fmt.int(nut.abertos)} leads parados em Nutrição.</b> Eles não aparecem no funil de nenhuma das duas áreas. Se esse volume deve contar como lead de mídia, o CPL real é bem mais baixo do que o mostrado.`]);
+      itens.push(['alerta', '📥', `<b>${fmt.int(nut.abertos)} leads parados em Nutrição.</b> Eles já entram na contagem de Novos, porque passaram por lá antes de serem movidos. O ponto é que estão estacionados: não avançam nem saem como perdidos.`]);
     }
     const semUtm = nov.total + pos.total - (nov.preenchimento.utm_campaign + pos.preenchimento.utm_campaign);
     if (semUtm > 0) {
