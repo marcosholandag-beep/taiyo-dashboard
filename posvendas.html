@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pós-Vendas · Taiyo Honda</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="topo">
+  <div class="topo-inner">
+    <a class="marca" href="index.html">
+      <span class="marca-selo">T</span>
+      <span>Taiyo Honda <span class="marca-sub">· Mensuração</span></span>
+    </a>
+    <nav class="nav">
+      <a href="index.html">Início</a>
+      <a href="novos.html">Novos</a>
+      <a href="posvendas.html" aria-current="page">Pós-Vendas</a>
+    </nav>
+    <span class="topo-meta js-atualizado"></span>
+  </div>
+</header>
+
+<main id="conteudo">
+  <h1 class="titulo-pagina">Pós-Vendas</h1>
+  <p class="subtitulo">
+    Oficina, peças e agendamento de revisão. Mídia da conta <code>act_858960833896053</code>
+    cruzada com o funil <b>Pós-venda</b> do Kommo.
+  </p>
+
+  <div class="filtros">
+    <span class="filtros-rotulo">Período:</span>
+    <button class="chip" type="button" data-periodo="7d" aria-pressed="false">7 dias</button>
+    <button class="chip" type="button" data-periodo="30d" aria-pressed="true">30 dias</button>
+    <button class="chip" type="button" data-periodo="90d" aria-pressed="false">90 dias</button>
+    <button class="chip" type="button" data-periodo="mes" aria-pressed="false">Mês corrente</button>
+  </div>
+
+  <div class="abas" role="tablist">
+    <button class="aba" role="tab" data-painel="painel-comercial" aria-selected="true">Comercial</button>
+    <button class="aba" role="tab" data-painel="painel-midia" aria-selected="false">Mídia</button>
+  </div>
+
+  <!-- ================= COMERCIAL ================= -->
+  <section class="painel" id="painel-comercial" role="tabpanel">
+    <div id="alerta-comercial"></div>
+    <div class="kpis" id="kpis-comercial"></div>
+
+    <div class="grade">
+      <div class="card meio">
+        <h3>Funil comercial</h3>
+        <p class="dica">Leads que alcançaram cada etapa, <span class="js-periodo"></span>. A queda aparece à direita.</p>
+        <div class="funil" id="funil"></div>
+      </div>
+
+      <div class="card meio">
+        <h3>Leads recebidos por dia</h3>
+        <p class="dica">Volume de entrada no funil Pós-venda.</p>
+        <div class="tela"><canvas id="g-leads-dia"></canvas></div>
+      </div>
+
+      <div class="card meio">
+        <h3>Serviço de interesse</h3>
+        <p class="dica">Campo “Modelo de interesse”, com a grafia normalizada.</p>
+        <div class="tela"><canvas id="g-modelos"></canvas></div>
+        <p class="vazio" id="sem-modelos" hidden>Nenhum lead com modelo preenchido no período.</p>
+      </div>
+
+      <div class="card meio">
+        <h3>Desempenho por vendedor</h3>
+        <p class="dica">Campo “Vendedores” do Kommo.</p>
+        <div id="t-vendedores"></div>
+      </div>
+
+      <div class="card meio">
+        <h3>Onde os leads se perdem</h3>
+        <p class="dica">Etapa mais avançada que o lead alcançou antes de sair como Perdido, reconstruída do histórico do Kommo.</p>
+        <div id="t-perda-etapa"></div>
+      </div>
+
+      <div class="card meio">
+        <h3>Motivos de perda</h3>
+        <p class="dica">Só conta o que foi preenchido ao mover o lead para Perdido.</p>
+        <div id="t-motivos"></div>
+      </div>
+
+      <div class="card meio">
+        <h3>Origem do lead</h3>
+        <p class="dica">Deduzida das UTMs e, na falta delas, das tags de anúncio do Kommo.</p>
+        <div id="t-origens"></div>
+      </div>
+
+      <div class="card">
+        <h3>Qualidade do preenchimento no CRM</h3>
+        <p class="dica">Quanto menor a cobertura, menos confiável fica o gráfico que depende do campo.</p>
+        <div id="t-qualidade"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MÍDIA ================= -->
+  <section class="painel" id="painel-midia" role="tabpanel" hidden>
+    <div id="alerta-midia"></div>
+    <div id="midia-conteudo"></div>
+  </section>
+</main>
+
+<footer class="rodape">
+  Leads: Kommo CRM (funil Pós-venda) · Investimento: Meta Ads <code>act_858960833896053</code>.
+  Dados agregados, sem informação pessoal. Atualização automática 2×/dia via GitHub Actions.
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="assets/app.js"></script>
+<script src="assets/pagina.js"></script>
+<script>
+montarPagina({
+  pipeline: 'posvendas',
+  conta: 'posvendas',
+  contaId: 'act_858960833896053',
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taiyo Honda · Mensuração</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="topo">
+  <div class="topo-inner">
+    <a class="marca" href="index.html">
+      <span class="marca-selo">T</span>
+      <span>Taiyo Honda <span class="marca-sub">· Mensuração</span></span>
+    </a>
+    <nav class="nav">
+      <a href="index.html" aria-current="page">Início</a>
+      <a href="novos.html">Novos</a>
+      <a href="posvendas.html">Pós-Vendas</a>
+    </nav>
+    <span class="topo-meta js-atualizado"></span>
+  </div>
+</header>
+
+<main id="conteudo">
+  <h1 class="titulo-pagina">Visão geral</h1>
+  <p class="subtitulo">
+    Mídia do Meta Ads e funil do Kommo, separados por área. Cada área tem uma aba
+    <b>Comercial</b> e uma aba <b>Mídia</b>.
+  </p>
+
+  <div class="filtros">
+    <span class="filtros-rotulo">Período:</span>
+    <button class="chip" type="button" data-periodo="7d" aria-pressed="false">7 dias</button>
+    <button class="chip" type="button" data-periodo="30d" aria-pressed="true">30 dias</button>
+    <button class="chip" type="button" data-periodo="90d" aria-pressed="false">90 dias</button>
+    <button class="chip" type="button" data-periodo="mes" aria-pressed="false">Mês corrente</button>
+  </div>
+
+  <div class="hub" id="hub"></div>
+
+  <div class="secao-titulo">Entrada de leads por dia</div>
+  <div class="grade">
+    <div class="card">
+      <h3>Novos vs. Pós-Vendas vs. Nutrição</h3>
+      <p class="dica">Leads criados por dia em cada funil do Kommo, <span class="js-periodo"></span>.</p>
+      <div class="tela alta"><canvas id="g-geral"></canvas></div>
+      <div class="legenda" id="legenda-geral"></div>
+    </div>
+  </div>
+
+  <div class="secao-titulo">O que precisa de atenção</div>
+  <div id="pendencias"></div>
+</main>
+
+<footer class="rodape">
+  Fontes: Kommo CRM (conta <code>taiyohonda</code>) · Meta Ads (<code>act_1667526963623142</code> e <code>act_858960833896053</code>).<br>
+  Os arquivos publicados contêm apenas números agregados — nenhum nome, telefone ou e-mail de lead.
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="assets/app.js"></script>
+<script>
+(async function () {
+  iniciarTema();
+  const kommo = await carregarJSON('data/kommo.json');
+  const meta = await carregarJSON('data/meta.json');
+
+  if (!kommo) {
+    document.getElementById('conteudo').innerHTML =
+      '<div class="aviso grave"><span class="aviso-icone">⚠</span><div>Não consegui carregar <b>data/kommo.json</b>. Se abriu o arquivo direto do disco, use um servidor local — o navegador bloqueia <code>fetch</code> em <code>file://</code>.</div></div>';
+    return;
+  }
+
+  document.querySelectorAll('.js-atualizado').forEach(el => {
+    el.textContent = 'CRM atualizado em ' + kommo.atualizado_em;
+  });
+
+  let periodo = '30d';
+
+  function pintar() {
+    const rot = ROTULO_PERIODO[periodo];
+    document.querySelectorAll('.js-periodo').forEach(el => { el.textContent = rot; });
+
+    const nov = kommo.pipelines.novos.periodos[periodo];
+    const pos = kommo.pipelines.posvendas.periodos[periodo];
+    const nut = kommo.pipelines.nutricao.periodos[periodo];
+    const gastoPos = meta?.contas?.posvendas?.periodos?.[periodo]?.gasto ?? null;
+    const gastoNov = meta?.contas?.novos?.periodos?.[periodo]?.gasto ?? null;
+
+    document.getElementById('hub').innerHTML = `
+      <a class="hub-card" href="novos.html">
+        <h2>Veículos Novos</h2>
+        <p>Funil comercial e mídia da conta de Novos.</p>
+        <div class="hub-nums">
+          <div class="hub-num"><div class="n">${fmt.int(nov.total)}</div><div class="r">Leads</div></div>
+          <div class="hub-num"><div class="n">${fmt.int(nov.ganhos)}</div><div class="r">Ganhos</div></div>
+          <div class="hub-num"><div class="n">${gastoNov === null ? '—' : fmt.moedaCurta(gastoNov)}</div><div class="r">Investido</div></div>
+        </div>
+      </a>
+      <a class="hub-card" href="posvendas.html">
+        <h2>Pós-Vendas</h2>
+        <p>Oficina, peças e agendamento de revisão.</p>
+        <div class="hub-nums">
+          <div class="hub-num"><div class="n">${fmt.int(pos.total)}</div><div class="r">Leads</div></div>
+          <div class="hub-num"><div class="n">${fmt.int(pos.ganhos)}</div><div class="r">Ganhos</div></div>
+          <div class="hub-num"><div class="n">${fmt.moedaCurta(pos.receita)}</div><div class="r">Receita</div></div>
+        </div>
+      </a>`;
+
+    // ---- grafico geral: 3 series categoricas (slots 1, 2, 3) ----
+    const serieDe = ch => recorteSerie(kommo.pipelines[ch].serie, periodo);
+    const sn = serieDe('novos'), sp = serieDe('posvendas'), su = serieDe('nutricao');
+    const dias = [...new Set([...sn, ...sp, ...su].map(d => d.data))].sort();
+    const mapa = s => { const m = {}; s.forEach(d => m[d.data] = d.leads); return m; };
+    const mn = mapa(sn), mp = mapa(sp), mu = mapa(su);
+
+    const series = [
+      { nome: 'Novos', dados: dias.map(d => mn[d] || 0), cor: cor('series-1') },
+      { nome: 'Pós-Vendas', dados: dias.map(d => mp[d] || 0), cor: cor('series-2') },
+      { nome: 'Nutrição', dados: dias.map(d => mu[d] || 0), cor: cor('series-3') },
+    ];
+
+    desenhar('g-geral', ctx => new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: dias.map(d => fmt.data(d)),
+        datasets: series.map(s => ({
+          label: s.nome, data: s.dados,
+          borderColor: s.cor, backgroundColor: 'transparent',
+          borderWidth: 2, tension: .3, pointRadius: 0, pointHoverRadius: 5,
+          pointHoverBackgroundColor: s.cor,
+          pointHoverBorderColor: cor('surface-1'), pointHoverBorderWidth: 2,
+        })),
+      },
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'bottom', align: 'start' } },
+        scales: { x: eixoX(), y: eixoY() },
+      },
+    }));
+
+    // legenda textual redundante (identidade nunca so pela cor)
+    document.getElementById('legenda-geral').innerHTML = series.map(s => {
+      const tot = s.dados.reduce((a, b) => a + b, 0);
+      return `<span><i style="background:${s.cor}"></i>${s.nome} — ${fmt.int(tot)} leads</span>`;
+    }).join('');
+
+    // ---- pendencias ----
+    const itens = [];
+    if (nov.ganhos === 0 && nov.total > 0) {
+      itens.push(['grave', '⚠', `<b>Nenhuma venda de veículo novo registrada no Kommo</b> — ${fmt.int(nov.total)} leads entraram e ${fmt.int(nov.perdidos)} saíram como perdidos, mas o funil Novos não registrou nenhum Ganho. Receita, ticket e CAC de Novos ficam sem base até a venda ser fechada no CRM.`]);
+    }
+    if (nut.abertos > 0) {
+      itens.push(['alerta', '📥', `<b>${fmt.int(nut.abertos)} leads parados em Nutrição.</b> Eles não aparecem no funil de nenhuma das duas áreas. Se esse volume deve contar como lead de mídia, o CPL real é bem mais baixo do que o mostrado.`]);
+    }
+    const semUtm = nov.total + pos.total - (nov.preenchimento.utm_campaign + pos.preenchimento.utm_campaign);
+    if (semUtm > 0) {
+      itens.push(['alerta', '🔗', `<b>${fmt.int(semUtm)} leads sem campanha identificada.</b> Sem UTM repassada ao Kommo não dá para dizer qual campanha gerou qual lead — o CPL só existe no agregado. Os leads de clique-para-WhatsApp são recuperados pela tag do anúncio.`]);
+    }
+    const perdSemMotivo = (nov.perdidos - nov.preenchimento.motivo_perda) + (pos.perdidos - pos.preenchimento.motivo_perda);
+    if (perdSemMotivo > 0) {
+      itens.push(['alerta', '❓', `<b>${fmt.int(perdSemMotivo)} leads perdidos sem motivo preenchido.</b> Tornar o motivo obrigatório na saída para Perdido é o que faz esse gráfico virar informação útil.`]);
+    }
+    if (meta?.fonte !== 'api') {
+      itens.push(['alerta', '⏳', `<b>Mídia ainda não conectada automaticamente.</b> Falta cadastrar o <code>META_TOKEN</code> nos Secrets do repositório. Até lá a aba Mídia mostra apenas a leitura manual de Pós-Vendas.`]);
+    }
+    if (!itens.length) itens.push(['ok', '✓', 'Nenhuma pendência de dados no período.']);
+
+    document.getElementById('pendencias').innerHTML = itens.map(
+      ([t, ic, txt]) => `<div class="aviso ${t}"><span class="aviso-icone">${ic}</span><div>${txt}</div></div>`
+    ).join('');
+  }
+
+  iniciarPeriodo(novo => { periodo = novo; pintar(); });
+  document.addEventListener('tema-mudou', () => setTimeout(pintar, 40));
+  pintar();
+})();
+</script>
+</body>
+</html>
