@@ -91,14 +91,6 @@ async function montarPagina(cfg) {
       },
     }));
 
-    // vendedores
-    renderTabela(document.getElementById('t-vendedores'), p.vendedores, [
-      { titulo: 'Vendedor', valor: l => l.nome },
-      { titulo: 'Leads', valor: l => fmt.int(l.leads) },
-      { titulo: 'Ganhos', valor: l => fmt.int(l.ganhos) },
-      { titulo: 'Conv.', valor: l => fmt.pct(l.conversao) },
-      { titulo: 'Receita', valor: l => l.receita ? fmt.moedaCurta(l.receita) : '—' },
-    ], 'O campo “Vendedores” não foi preenchido em nenhum lead deste período.');
 
     // modelos de interesse — o canvas fica sempre no DOM; a mensagem de vazio
     // vai num irmao, senao trocar de periodo nao acha mais o canvas.
@@ -153,7 +145,6 @@ async function montarPagina(cfg) {
     const pr = p.preenchimento;
     const linhas = [
       { campo: 'UTM / Campanha', ok: pr.utm_campaign, de: p.total },
-      { campo: 'Vendedor', ok: pr.vendedor, de: p.total },
       { campo: 'Modelo de interesse', ok: pr.modelo, de: p.total },
       { campo: 'Unidade', ok: pr.unidade, de: p.total },
       { campo: 'Motivo da perda', ok: pr.motivo_perda, de: p.perdidos },

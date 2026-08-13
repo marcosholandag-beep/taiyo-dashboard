@@ -70,6 +70,16 @@ FUNIL = {
     "seminovos": [105239208, 105239212, 105239264, 105239268],
 }
 
+# Etapas cujo alcance e contado pela TAG e nao pelo status.
+# O Kommo tem uma automacao que marca a tag quando o lead entra na etapa, e a
+# tag fica no lead mesmo depois que ele sai — entao ela e o registro mais fiel
+# de "passou por aqui" do que o status atual ou o historico de 90 dias.
+TAG_ETAPA = {
+    98470203: "Encaminhado",             # Novos > Encaminhado para Vendas
+    98524647: "Visita/Test-Drive",       # Novos > Visita / Test-Drive
+    98524651: "Aguardando faturamento",  # Novos > Aguardando Faturamento
+}
+
 CF = {
     "utm_source": 3043886,
     "utm_campaign": 3043884,
@@ -268,13 +278,27 @@ def agrega_periodo(leads, funil_ids, hist):
 
     etapas = []
     for i, sid in enumerate(funil_ids):
+        tag = TAG_ETAPA.get(sid)
+        if tag:
+            alcancaram = sum(1 for l in leads if tag in tags(l))
+        else:
+            alcancaram = sum(1 for l in leads if avanco[l["id"]] >= i)
         etapas.append({
             "id": sid,
             "nome": STATUS_NOMES.get(sid, str(sid)),
             "parados": sum(1 for l in leads if l["status_id"] == sid),
-            "alcancaram": sum(1 for l in leads if avanco[l["id"]] >= i),
+            "alcancaram": alcancaram,
+            "fonte": "tag" if tag else "status",
         })
-    etapas.append({"id": 142, "nome": "Ganho", "parados": len(ganhos), "alcancaram": len(ganhos)})
+    etapas.append({"id": 142, "nome": "Ganho", "parados": len(ganhos),
+                   "alcancaram": len(ganhos), "fonte": "status"})
+
+    # Um funil nao pode crescer: se uma etapa contada por tag ficar acima da
+    # anterior (lead que ganhou a tag sem passar pelo status intermediario),
+    # a etapa anterior absorve o valor, senao a barra fica maior que a de cima.
+    for i in range(len(etapas) - 2, -1, -1):
+        if etapas[i]["alcancaram"] < etapas[i + 1]["alcancaram"]:
+            etapas[i]["alcancaram"] = etapas[i + 1]["alcancaram"]
 
     # onde os leads perdidos pararam
     perda_etapa = collections.Counter()
