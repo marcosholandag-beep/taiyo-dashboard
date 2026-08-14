@@ -53,14 +53,20 @@ async function montarPagina(cfg) {
   function pintarComercial(p, rot) {
     const semVenda = p.ganhos === 0 && p.total > 0;
 
+    // Areas onde a venda nao e fechada no Kommo escondem Ganhos e Receita:
+    // os dois sairiam zerados e so competiriam com o card de vendas informadas.
+    const mostraGanhoCRM = !cfg.vendaForaDoCRM;
+
     document.getElementById('kpis-comercial').innerHTML = [
       kpi({ rotulo: 'Leads recebidos', valor: fmt.int(p.total), nota: rot }),
-      kpi({
-        rotulo: 'Ganhos', valor: fmt.int(p.ganhos),
-        nota: p.total ? fmt.pct(p.taxa_conversao) + ' de conversão' : '—',
-        tom: p.taxa_conversao >= 20 ? 'bom' : null,
-      }),
-      kpi({ rotulo: 'Receita', valor: fmt.moedaCurta(p.receita), nota: p.ganhos ? 'ticket ' + fmt.moedaCurta(p.ticket_medio) : '—' }),
+      ...(mostraGanhoCRM ? [
+        kpi({
+          rotulo: 'Ganhos', valor: fmt.int(p.ganhos),
+          nota: p.total ? fmt.pct(p.taxa_conversao) + ' de conversão' : '—',
+          tom: p.taxa_conversao >= 20 ? 'bom' : null,
+        }),
+        kpi({ rotulo: 'Receita', valor: fmt.moedaCurta(p.receita), nota: p.ganhos ? 'ticket ' + fmt.moedaCurta(p.ticket_medio) : '—' }),
+      ] : []),
       kpi({ rotulo: 'Perdidos', valor: fmt.int(p.perdidos), nota: fmt.pct(p.taxa_perda) + ' do total', tom: p.taxa_perda > 60 ? 'ruim' : null }),
       kpi({ rotulo: 'Em aberto', valor: fmt.int(p.abertos), nota: 'no funil agora' }),
       kpi({
@@ -72,7 +78,10 @@ async function montarPagina(cfg) {
         rotulo: 'Vendas informadas',
         valor: fmt.int(p.manuais.length),
         nota: 'fora do CRM — informado pela equipe',
-      })] : []),
+      })] : (cfg.vendaForaDoCRM ? [kpi({
+        rotulo: 'Vendas informadas', valor: '0',
+        nota: 'nenhuma informada neste período',
+      })] : [])),
     ].join('');
 
     // aviso quando o funil nao registra venda

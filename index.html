@@ -61,8 +61,6 @@
     </div>
   </div>
 
-  <div class="secao-titulo">O que precisa de atenção</div>
-  <div id="pendencias"></div>
 </main>
 
 <footer class="rodape">
@@ -77,6 +75,7 @@
   iniciarTema();
   const kommo = await carregarJSON('data/kommo.json');
   const meta = await carregarJSON('data/meta.json');
+  const manual = await carregarJSON('data/manual.json');
 
   if (!kommo) {
     document.getElementById('conteudo').innerHTML =
@@ -101,8 +100,19 @@
 
     const nov = agrega('novos');
     const pos = agrega('posvendas');
-    const nut = agrega('nutricao');
     const sem = agrega('seminovos');
+
+    // Vendas de cada área: as do funil quando existem; senão, as que a equipe
+    // informou fora do CRM. O rótulo do card diz de onde o número veio.
+    const de = isoDoDia(d0, kommo.inicio), ate = isoDoDia(d1, kommo.inicio);
+    const vendasDe = (area, p) => {
+      if (p.ganhos) return { n: p.ganhos, rotulo: 'Ganhos' };
+      const fora = (manual?.vendas?.[area] || []).filter(v => v.data >= de && v.data <= ate);
+      return fora.length
+        ? { n: fora.length, rotulo: 'Vendas informadas' }
+        : { n: 0, rotulo: 'Ganhos' };
+    };
+    const vSem = vendasDe('seminovos', sem);
     const gastoSem = midiaDoIntervalo(meta?.contas?.seminovos, periodo, kommo.inicio, d0, d1)?.gasto ?? null;
     const gastoNov = midiaDoIntervalo(meta?.contas?.novos, periodo, kommo.inicio, d0, d1)?.gasto ?? null;
 
@@ -130,7 +140,7 @@
         <p>Funil de seminovos e a conta de mídia da área.</p>
         <div class="hub-nums">
           <div class="hub-num"><div class="n">${fmt.int(sem.total)}</div><div class="r">Leads</div></div>
-          <div class="hub-num"><div class="n">${fmt.int(sem.ganhos)}</div><div class="r">Ganhos</div></div>
+          <div class="hub-num"><div class="n">${fmt.int(vSem.n)}</div><div class="r">${vSem.rotulo}</div></div>
           <div class="hub-num"><div class="n">${gastoSem === null ? '—' : fmt.moedaCurta(gastoSem)}</div><div class="r">Investido</div></div>
         </div>
       </a>`;
@@ -172,30 +182,6 @@
       return `<span><i style="background:${s.cor}"></i>${s.nome} — ${fmt.int(tot)} leads</span>`;
     }).join('');
 
-    // ---- pendencias ----
-    const itens = [];
-    if (nov.ganhos === 0 && nov.total > 0) {
-      itens.push(['grave', '⚠', `<b>Nenhuma venda de veículo novo registrada no Kommo</b> — ${fmt.int(nov.total)} leads entraram e ${fmt.int(nov.perdidos)} saíram como perdidos, mas o funil Novos não registrou nenhum Ganho. Receita, ticket e CAC de Novos ficam sem base até a venda ser fechada no CRM.`]);
-    }
-    if (nut.abertos > 0) {
-      itens.push(['alerta', '📥', `<b>${fmt.int(nut.abertos)} leads parados em Nutrição.</b> Eles já entram na contagem de Novos, porque passaram por lá antes de serem movidos. O ponto é que estão estacionados: não avançam nem saem como perdidos.`]);
-    }
-    const semUtm = nov.total + pos.total - (nov.preenchimento.utm_campaign + pos.preenchimento.utm_campaign);
-    if (semUtm > 0) {
-      itens.push(['alerta', '🔗', `<b>${fmt.int(semUtm)} leads sem campanha identificada.</b> Sem UTM repassada ao Kommo não dá para dizer qual campanha gerou qual lead — o CPL só existe no agregado. Os leads de clique-para-WhatsApp são recuperados pela tag do anúncio.`]);
-    }
-    const perdSemMotivo = (nov.perdidos - nov.preenchimento.motivo_perda) + (pos.perdidos - pos.preenchimento.motivo_perda);
-    if (perdSemMotivo > 0) {
-      itens.push(['alerta', '❓', `<b>${fmt.int(perdSemMotivo)} leads perdidos sem motivo preenchido.</b> Tornar o motivo obrigatório na saída para Perdido é o que faz esse gráfico virar informação útil.`]);
-    }
-    if (meta?.fonte !== 'api') {
-      itens.push(['alerta', '⏳', `<b>Mídia ainda não conectada automaticamente.</b> Falta cadastrar o <code>META_TOKEN</code> nos Secrets do repositório. Até lá a aba Mídia mostra apenas a leitura manual de Pós-Vendas.`]);
-    }
-    if (!itens.length) itens.push(['ok', '✓', 'Nenhuma pendência de dados no período.']);
-
-    document.getElementById('pendencias').innerHTML = itens.map(
-      ([t, ic, txt]) => `<div class="aviso ${t}"><span class="aviso-icone">${ic}</span><div>${txt}</div></div>`
-    ).join('');
   }
 
   iniciarPeriodo((novo, faixa) => { periodo = novo; custom = faixa; pintar(); }, {
