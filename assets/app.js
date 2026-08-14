@@ -419,3 +419,68 @@ function iniciarPeriodo(aoTrocar, limites) {
   });
 }
 
+
+
+/* ==========================================================================
+   Previa do criativo
+
+   A miniatura da tabela e pequena demais para julgar um anuncio. Passar o
+   mouse (ou focar pelo teclado, ou tocar no celular) abre a imagem grande
+   ancorada perto do cursor, sem sair da pagina.
+   ========================================================================== */
+let _previaEl = null;
+
+function montarPrevia() {
+  if (_previaEl) return;
+  _previaEl = document.createElement('div');
+  _previaEl.className = 'previa-flutuante';
+  _previaEl.hidden = true;
+  _previaEl.innerHTML = '<img alt="Prévia do criativo">';
+  document.body.appendChild(_previaEl);
+
+  const img = _previaEl.querySelector('img');
+
+  const abrir = alvo => {
+    const url = alvo.dataset.previa;
+    if (!url) return;
+    if (img.getAttribute('src') !== url) img.setAttribute('src', url);
+    _previaEl.hidden = false;
+    posicionar(alvo);
+  };
+  const fechar = () => { _previaEl.hidden = true; };
+
+  const posicionar = alvo => {
+    const r = alvo.getBoundingClientRect();
+    const L = 300, margem = 12;
+    // abre a direita se couber; senao, a esquerda
+    let x = r.right + margem;
+    if (x + L > window.innerWidth) x = Math.max(margem, r.left - L - margem);
+    let y = r.top + r.height / 2 - L / 2;
+    y = Math.min(Math.max(margem, y), window.innerHeight - L - margem);
+    _previaEl.style.left = x + 'px';
+    _previaEl.style.top = y + 'px';
+  };
+
+  document.addEventListener('mouseover', ev => {
+    const alvo = ev.target.closest('.criativo-mini');
+    if (alvo) abrir(alvo);
+  });
+  document.addEventListener('mouseout', ev => {
+    if (ev.target.closest('.criativo-mini') && !ev.relatedTarget?.closest('.criativo-mini')) fechar();
+  });
+  document.addEventListener('focusin', ev => {
+    const alvo = ev.target.closest('.criativo-mini');
+    if (alvo) abrir(alvo);
+  });
+  document.addEventListener('focusout', ev => {
+    if (ev.target.closest('.criativo-mini')) fechar();
+  });
+  // no celular nao existe hover: o toque abre e o proximo toque fora fecha
+  document.addEventListener('click', ev => {
+    const alvo = ev.target.closest('.criativo-mini');
+    if (alvo) { ev.preventDefault(); _previaEl.hidden ? abrir(alvo) : fechar(); }
+    else fechar();
+  });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') fechar(); });
+  window.addEventListener('scroll', fechar, { passive: true });
+}

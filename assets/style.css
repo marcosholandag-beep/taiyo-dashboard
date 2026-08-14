@@ -379,3 +379,39 @@ tbody tr:hover { background: var(--surface-2); }
   color: var(--brand-ink); cursor: pointer; font-family: inherit;
 }
 .btn-aplicar:hover { filter: brightness(.94); }
+
+/* ---------- previa do criativo ---------- */
+.criativo { display: flex; align-items: center; gap: 9px; }
+.criativo-mini {
+  position: relative; flex: none; display: block;
+  cursor: zoom-in; border-radius: 7px; outline: none;
+}
+.criativo-mini:focus-visible { box-shadow: 0 0 0 2px var(--brand); }
+.criativo-olho {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  background: rgba(26, 26, 26, .55);
+  color: #fff; font-size: 15px; line-height: 1;
+  border-radius: 7px;
+  opacity: 0; transition: opacity .13s;
+}
+.criativo-mini:hover .criativo-olho,
+.criativo-mini:focus-visible .criativo-olho { opacity: 1; }
+
+.previa-flutuante {
+  position: fixed; z-index: 60;
+  width: 300px; height: 300px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: 0 8px 28px rgba(26, 26, 26, .18);
+  padding: 6px;
+  pointer-events: none;
+}
+.previa-flutuante[hidden] { display: none; }
+.previa-flutuante img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  border-radius: 9px;
+  background: var(--surface-2);
+}

@@ -147,25 +147,45 @@ def ranking(linhas, chave_id, chave_nome, n=12):
 
 def thumbs(ad_ids):
     """
-    Busca a miniatura de cada criativo.
+    Miniatura e imagem grande de cada criativo.
+
+    Devolve {ad_id: (miniatura, previa)} — a miniatura vai na tabela e a previa
+    aparece ao passar o mouse. O thumbnail_url e pedido em 600x600 para a previa
+    nao sair borrada.
 
     Uma chamada por anuncio: o parametro `ids` em lote foi descontinuado na
     v26+ e a Graph API recusa mesmo quando a URL pede uma versao anterior.
     """
     out = {}
     for ad_id in [i for i in ad_ids if i]:
-        params = {
-            "access_token": TOKEN,
-            "fields": "creative{thumbnail_url,image_url}",
-        }
         try:
-            d = http_get(f"{API}/{ad_id}?" + urllib.parse.urlencode(params))
+            d = http_get(f"{API}/{ad_id}?" + urllib.parse.urlencode({
+                "access_token": TOKEN,
+                "fields": "creative{id,thumbnail_url,image_url}",
+            }))
         except RuntimeError:
             continue
         cr = (d or {}).get("creative") or {}
-        url = cr.get("thumbnail_url") or cr.get("image_url")
-        if url:
-            out[ad_id] = url
+        mini = cr.get("thumbnail_url") or cr.get("image_url")
+        if not mini:
+            continue
+
+        # A imagem grande: para anuncio de imagem o image_url ja e grande; para
+        # video so existe o thumbnail, e o parametro de tamanho so funciona no
+        # no do CRIATIVO (no do anuncio ele e ignorado e volta 64x64).
+        grande = cr.get("image_url")
+        if not grande and cr.get("id"):
+            try:
+                d2 = http_get(f"{API}/{cr['id']}?" + urllib.parse.urlencode({
+                    "access_token": TOKEN,
+                    "fields": "thumbnail_url",
+                    "thumbnail_width": 600,
+                    "thumbnail_height": 600,
+                }))
+                grande = (d2 or {}).get("thumbnail_url")
+            except RuntimeError:
+                pass
+        out[ad_id] = (mini, grande or mini)
     return out
 
 
@@ -221,7 +241,9 @@ def main():
             top_ads = [a["id"] for a in bloco["periodos"]["30d"]["anuncios"]]
             imagens = thumbs(top_ads)
             for a in bloco["periodos"]["30d"]["anuncios"]:
-                a["thumb"] = imagens.get(a["id"])
+                par = imagens.get(a["id"])
+                if par:
+                    a["thumb"], a["previa"] = par
 
         except Exception as e:  # noqa: BLE001 — uma conta nao pode derrubar a outra
             bloco["erro"] = str(e)[:300]

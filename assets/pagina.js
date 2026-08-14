@@ -228,7 +228,11 @@ async function montarPagina(cfg) {
       </div>`;
 
     const cpl = p.total ? m.gasto / p.total : 0;
-    const cac = p.ganhos ? m.gasto / p.ganhos : 0;
+    // sem venda no CRM, o CAC sai das vendas informadas pela equipe — e o card
+    // diz de onde veio, para ninguem confundir com dado do funil
+    const vendas = p.ganhos || p.manuais?.length || 0;
+    const vendaManual = !p.ganhos && p.manuais?.length;
+    const cac = vendas ? m.gasto / vendas : 0;
 
     document.getElementById('kpis-midia').innerHTML = [
       kpi({ rotulo: 'Investimento', valor: fmt.moedaCurta(m.gasto), nota: rot }),
@@ -243,7 +247,13 @@ async function montarPagina(cfg) {
         nota: m.resultados_parciais ? 'aguardando leitura completa' : 'no Meta',
       }),
       kpi({ rotulo: 'CPL no CRM', valor: p.total ? fmt.moeda(cpl) : '—', nota: `${fmt.int(p.total)} leads no Kommo` }),
-      kpi({ rotulo: 'CAC', valor: p.ganhos ? fmt.moeda(cac) : '—', nota: p.ganhos ? `${fmt.int(p.ganhos)} vendas` : 'sem venda registrada' }),
+      kpi({
+        rotulo: 'CAC', valor: vendas ? fmt.moeda(cac) : '—',
+        nota: vendas
+          ? `${fmt.int(vendas)} venda${vendas > 1 ? 's' : ''}${vendaManual ? ' informada' + (vendas > 1 ? 's' : '') + ' fora do CRM' : ''}`
+          : 'sem venda registrada',
+        tom: vendaManual ? 'ruim' : null,
+      }),
       kpi({ rotulo: 'Alcance', valor: fmt.int(m.alcance), nota: fmt.int(m.impressoes) + ' impressões' }),
       kpi({ rotulo: 'CTR', valor: fmt.pct(m.ctr), nota: fmt.int(m.cliques) + ' cliques' }),
       kpi({ rotulo: 'CPM', valor: fmt.moeda(m.cpm), nota: 'CPC ' + fmt.moeda(m.cpc) }),
@@ -304,10 +314,17 @@ async function montarPagina(cfg) {
       { titulo: 'CPR', valor: l => l.resultado_confirmado === false || !l.resultados ? '—' : fmt.moeda(l.cpr) },
     ]);
 
+    montarPrevia();
     renderTabela(document.getElementById('t-anuncios'), m.anuncios, [
       {
         titulo: 'Criativo', valor: l => l.thumb
-          ? `<div style="display:flex;align-items:center;gap:9px"><img class="miniatura" src="${l.thumb}" alt="" loading="lazy"><span>${l.nome}</span></div>`
+          ? `<div class="criativo">
+               <span class="criativo-mini" data-previa="${l.previa || l.thumb}" tabindex="0" role="button" aria-label="Ver prévia de ${l.nome}">
+                 <img class="miniatura" src="${l.thumb}" alt="" loading="lazy">
+                 <span class="criativo-olho" aria-hidden="true">&#128065;</span>
+               </span>
+               <span>${l.nome}</span>
+             </div>`
           : l.nome,
       },
       { titulo: 'Investido', valor: l => fmt.moeda(l.gasto) },
