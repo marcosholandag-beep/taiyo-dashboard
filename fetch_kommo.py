@@ -50,7 +50,7 @@ STATUS_NOMES = {
     102442840: "Agendado",
     # Nutricao
     98530327: "Leads de entrada",
-    98530331: "Nutricao",
+    98530331: "Nutrição",
     # Seminovos
     105239208: "Leads de entrada",
     105239212: "Em atendimento",
@@ -311,8 +311,8 @@ def origem_do_lead(lead):
     if any("meta" in t.lower() or "patrocinado" in t.lower() for t in ts):
         return "Meta Ads (tag)"
     if any("reativado" in t.lower() for t in ts):
-        return "Reativacao"
-    return "(nao identificado)"
+        return "Reativação"
+    return "(não identificado)"
 
 
 def monta_registros(leads, funil_ids, hist, dia_zero, dicts):

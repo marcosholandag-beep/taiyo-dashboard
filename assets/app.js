@@ -2,6 +2,14 @@
    Taiyo Honda — helpers compartilhados do dashboard
    ========================================================================== */
 
+/* ==========================================================================
+   A Taiyo deixou de usar o Kommo como CRM (set/2026). As abas de CRM e os
+   numeros de funil ficam desligados por aqui, sem apagar o codigo: a venda
+   passou a ser fechada no Syonet e, quando a integracao existir, este
+   interruptor volta para true com a fonte nova.
+   ========================================================================== */
+const CRM_ATIVO = false;
+
 /* ---------- formatacao ---------- */
 const fmt = {
   int: n => (n ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 }),
@@ -19,6 +27,36 @@ const fmt = {
     return `${d}/${m}`;
   },
 };
+
+/** Como cada area chama o seu resultado. */
+function rotulosMetrica(conta) {
+  return conta?.metrica === 'leads'
+    ? { plural: 'Leads', custo: 'Custo por lead', curto: 'Leads', custoCurto: 'CPL',
+        nota: 'formulários preenchidos no Meta' }
+    : { plural: 'Resultados', custo: 'Custo por resultado', curto: 'Result.', custoCurto: 'CPR',
+        nota: 'conversas no WhatsApp + formulários' };
+}
+
+/** Primeiro dia com dado de midia, usado como base dos indices de dia. */
+function inicioMeta(meta) {
+  const datas = Object.values(meta?.contas || {})
+    .flatMap(c => (c.serie || []).map(s => s.data))
+    .filter(Boolean)
+    .sort();
+  if (datas.length) return datas[0];
+  const d = new Date(); d.setDate(d.getDate() - 180);
+  return isoLocal(d);
+}
+
+/** Esconde a aba de CRM e deixa Midia como unico painel. */
+function desativarAbaCRM() {
+  const crm = document.getElementById('painel-comercial');
+  if (crm) crm.remove();
+  const barra = document.querySelector('.abas');
+  if (barra) barra.remove();
+  const painel = document.getElementById('painel-midia');
+  if (painel) painel.hidden = false;
+}
 
 /* ---------- paleta (lida do CSS, acompanha o tema) ---------- */
 function cor(nome) {
@@ -327,11 +365,19 @@ function rotuloPeriodo(periodo, custom) {
   return ROTULO_PERIODO[periodo] || periodo;
 }
 
-/** Recorta a serie diaria do Meta ao intervalo pedido. */
+/**
+ * Recorta a serie diaria do Meta, preenchendo com zero os dias sem veiculacao.
+ * A API omite esses dias, e sem o preenchimento o eixo do grafico pulava datas
+ * — 30 dias apareciam como 29 barras.
+ */
 function recorteMeta(serie, inicioISO, d0, d1) {
-  if (!serie || !serie.length) return [];
-  const de = isoDoDia(d0, inicioISO), ate = isoDoDia(d1, inicioISO);
-  return serie.filter(p => p.data >= de && p.data <= ate);
+  const porData = new Map((serie || []).map(p => [p.data, p]));
+  const out = [];
+  for (let d = d0; d <= d1; d++) {
+    const data = isoDoDia(d, inicioISO);
+    out.push(porData.get(data) || { data, gasto: 0, impressoes: 0, cliques: 0, resultados: 0 });
+  }
+  return out;
 }
 
 /**
@@ -483,4 +529,34 @@ function montarPrevia() {
   });
   document.addEventListener('keydown', ev => { if (ev.key === 'Escape') fechar(); });
   window.addEventListener('scroll', fechar, { passive: true });
+}
+
+
+/**
+ * Faixa de dados desatualizados.
+ *
+ * O dashboard e estatico: se a coleta parar, ele continua mostrando numeros
+ * antigos com cara de atuais — e um filtro de 7 dias cujo intervalo caiu depois
+ * da ultima coleta mostra ZERO, que se le como "nao entrou lead". Este aviso
+ * torna isso impossivel de passar batido.
+ */
+function avisoDefasagem(kommo, meta) {
+  const alvo = document.getElementById('conteudo');
+  const carimbo = (CRM_ATIVO ? kommo?.atualizado_em : null) || meta?.atualizado_em;
+  if (!alvo || !carimbo) return;
+
+  const [dia, mes, ano] = carimbo.split(' ')[0].split('/').map(Number);
+  const coleta = new Date(ano, mes - 1, dia);
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const atraso = Math.round((hoje - coleta) / 86400000);
+  if (atraso < 2) return;
+
+  const el = document.createElement('div');
+  el.className = 'aviso grave';
+  el.innerHTML = '<span class="aviso-icone">&#9888;</span><div>'
+    + `<b>Dados com ${atraso} dias de atraso.</b> A última coleta foi em ${carimbo}. `
+    + 'Períodos que caem depois dessa data aparecem zerados — não é ausência de anúncio, '
+    + 'é ausência de coleta. A atualização automática ainda não está ligada no repositório.'
+    + '</div>';
+  alvo.insertBefore(el, alvo.firstChild);
 }

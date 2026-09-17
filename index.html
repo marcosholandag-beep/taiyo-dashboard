@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css?v=20260917">
 </head>
 <body>
 
@@ -30,8 +30,7 @@
 <main id="conteudo">
   <h1 class="titulo-pagina">Visão geral</h1>
   <p class="subtitulo">
-    Mídia do Meta Ads e funil do Kommo, separados por área. Cada área tem uma aba
-    <b>CRM</b> e uma aba <b>Mídia</b>.
+    Investimento e resultado do Meta Ads, separados por área.
   </p>
 
   <div class="filtros">
@@ -51,11 +50,11 @@
 
   <div class="hub" id="hub"></div>
 
-  <div class="secao-titulo">Entrada de leads por dia</div>
+  <div class="secao-titulo">Investimento por dia</div>
   <div class="grade">
     <div class="card">
-      <h3>Novos vs. Pós-Vendas</h3>
-      <p class="dica">Leads que entraram em cada funil por dia, <span class="js-periodo"></span>. Nutrição não aparece separada porque quase todo lead dela passou antes por Novos — já está contado ali.</p>
+      <h3>Investimento por dia</h3>
+      <p class="dica">Valor gasto em cada conta de anúncio por dia, <span class="js-periodo"></span>.</p>
       <div class="tela alta"><canvas id="g-geral"></canvas></div>
       <div class="legenda" id="legenda-geral"></div>
     </div>
@@ -64,98 +63,70 @@
 </main>
 
 <footer class="rodape">
-  Fontes: Kommo CRM (conta <code>taiyohonda</code>) · Meta Ads (<code>act_1667526963623142</code> e <code>act_858960833896053</code>).<br>
-  Os arquivos publicados contêm apenas números agregados — nenhum nome, telefone ou e-mail de lead.
+  Fonte: Meta Ads — <code>act_1667526963623142</code> (Novos), <code>act_858960833896053</code> (Pós-Vendas)
+  e <code>act_1227886575905312</code> (Seminovos).<br>
+  Os arquivos publicados contêm apenas números agregados — nenhum dado pessoal de lead.
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="assets/app.js"></script>
+<script src="assets/app.js?v=20260917"></script>
 <script>
 (async function () {
   iniciarTema();
-  const kommo = await carregarJSON('data/kommo.json');
   const meta = await carregarJSON('data/meta.json');
-  const manual = await carregarJSON('data/manual.json');
 
-  if (!kommo) {
+  if (!meta) {
     document.getElementById('conteudo').innerHTML =
-      '<div class="aviso grave"><span class="aviso-icone">⚠</span><div>Não consegui carregar <b>data/kommo.json</b>. Se abriu o arquivo direto do disco, use um servidor local — o navegador bloqueia <code>fetch</code> em <code>file://</code>.</div></div>';
+      '<div class="aviso grave"><span class="aviso-icone">&#9888;</span><div>Não consegui carregar <b>data/meta.json</b>. Se abriu o arquivo direto do disco, use um servidor local — o navegador bloqueia <code>fetch</code> em <code>file://</code>.</div></div>';
     return;
   }
 
   document.querySelectorAll('.js-atualizado').forEach(el => {
-    el.textContent = 'CRM atualizado em ' + kommo.atualizado_em;
+    el.textContent = 'Mídia atualizada em ' + meta.atualizado_em;
   });
+  avisoDefasagem(null, meta);
+
+  const base = inicioMeta(meta);
+  const AREAS = [
+    { chave: 'novos', titulo: 'Veículos Novos', pagina: 'novos.html',
+      desc: 'Conta de anúncio de veículos novos.', cor: 'series-1' },
+    { chave: 'posvendas', titulo: 'Pós-Vendas', pagina: 'posvendas.html',
+      desc: 'Oficina, peças e agendamento de revisão.', cor: 'series-2' },
+    { chave: 'seminovos', titulo: 'Seminovos', pagina: 'seminovos.html',
+      desc: 'Conta de anúncio de seminovos.', cor: 'series-3' },
+  ];
 
   let periodo = '30d';
   let custom = null;
-
-  const agrega = ch => agregar(kommo.leads[ch] || [], kommo.etapas[ch] || [], kommo.dic, d0, d1);
   let d0 = 0, d1 = 0;
 
   function pintar() {
-    [d0, d1] = intervalo(periodo, kommo.inicio, custom);
+    [d0, d1] = intervalo(periodo, base, custom);
     const rot = rotuloPeriodo(periodo, custom);
     document.querySelectorAll('.js-periodo').forEach(el => { el.textContent = rot; });
 
-    const nov = agrega('novos');
-    const pos = agrega('posvendas');
-    const sem = agrega('seminovos');
-
-    // Vendas de cada área: as do funil quando existem; senão, as que a equipe
-    // informou fora do CRM. O rótulo do card diz de onde o número veio.
-    const de = isoDoDia(d0, kommo.inicio), ate = isoDoDia(d1, kommo.inicio);
-    const vendasDe = (area, p) => {
-      if (p.ganhos) return { n: p.ganhos, rotulo: 'Ganhos' };
-      const fora = (manual?.vendas?.[area] || []).filter(v => v.data >= de && v.data <= ate);
-      return fora.length
-        ? { n: fora.length, rotulo: 'Vendas informadas' }
-        : { n: 0, rotulo: 'Ganhos' };
-    };
-    const vSem = vendasDe('seminovos', sem);
-    const gastoSem = midiaDoIntervalo(meta?.contas?.seminovos, periodo, kommo.inicio, d0, d1)?.gasto ?? null;
-    const gastoNov = midiaDoIntervalo(meta?.contas?.novos, periodo, kommo.inicio, d0, d1)?.gasto ?? null;
-
-    document.getElementById('hub').innerHTML = `
-      <a class="hub-card" href="novos.html">
-        <h2>Veículos Novos</h2>
-        <p>Funil comercial e mídia da conta de Novos.</p>
+    document.getElementById('hub').innerHTML = AREAS.map(a => {
+      const conta = meta.contas?.[a.chave];
+      const m = midiaDoIntervalo(conta, periodo, base, d0, d1);
+      const r = rotulosMetrica(conta);
+      return `
+      <a class="hub-card" href="${a.pagina}">
+        <h2>${a.titulo}</h2>
+        <p>${a.desc}</p>
         <div class="hub-nums">
-          <div class="hub-num"><div class="n">${fmt.int(nov.total)}</div><div class="r">Leads</div></div>
-          <div class="hub-num"><div class="n">${fmt.int(nov.ganhos)}</div><div class="r">Ganhos</div></div>
-          <div class="hub-num"><div class="n">${gastoNov === null ? '—' : fmt.moedaCurta(gastoNov)}</div><div class="r">Investido</div></div>
-        </div>
-      </a>
-      <a class="hub-card" href="posvendas.html">
-        <h2>Pós-Vendas</h2>
-        <p>Oficina, peças e agendamento de revisão.</p>
-        <div class="hub-nums">
-          <div class="hub-num"><div class="n">${fmt.int(pos.total)}</div><div class="r">Leads</div></div>
-          <div class="hub-num"><div class="n">${fmt.int(pos.ganhos)}</div><div class="r">Ganhos</div></div>
-          <div class="hub-num"><div class="n">${fmt.moedaCurta(pos.receita)}</div><div class="r">Receita</div></div>
-        </div>
-      </a>
-      <a class="hub-card" href="seminovos.html">
-        <h2>Seminovos</h2>
-        <p>Funil de seminovos e a conta de mídia da área.</p>
-        <div class="hub-nums">
-          <div class="hub-num"><div class="n">${fmt.int(sem.total)}</div><div class="r">Leads</div></div>
-          <div class="hub-num"><div class="n">${fmt.int(vSem.n)}</div><div class="r">${vSem.rotulo}</div></div>
-          <div class="hub-num"><div class="n">${gastoSem === null ? '—' : fmt.moedaCurta(gastoSem)}</div><div class="r">Investido</div></div>
+          <div class="hub-num"><div class="n">${m ? fmt.moedaCurta(m.gasto) : '—'}</div><div class="r">Investido</div></div>
+          <div class="hub-num"><div class="n">${m ? fmt.int(m.resultados) : '—'}</div><div class="r">${r.plural}</div></div>
+          <div class="hub-num"><div class="n">${m && m.resultados ? fmt.moeda(m.cpr) : '—'}</div><div class="r">${r.custoCurto}</div></div>
         </div>
       </a>`;
+    }).join('');
 
-    // ---- grafico geral: 3 series categoricas (slots 1, 2, 3) ----
-    const sn = serieDiaria(kommo.leads.novos || [], kommo.inicio, d0, d1);
-    const sp = serieDiaria(kommo.leads.posvendas || [], kommo.inicio, d0, d1);
-    const dias = sn.map(x => x.data);
-    const mapa = s => { const m = {}; s.forEach(d => m[d.data] = d.leads); return m; };
-    const mn = mapa(sn), mp = mapa(sp);
-
-    const series = [
-      { nome: 'Novos', dados: dias.map(d => mn[d] || 0), cor: cor('series-1') },
-      { nome: 'Pós-Vendas', dados: dias.map(d => mp[d] || 0), cor: cor('series-2') },
-    ];
+    // investimento diario das tres contas: mesma unidade, um eixo so
+    const series = AREAS.map(a => {
+      const s = recorteMeta(meta.contas?.[a.chave]?.serie, base, d0, d1);
+      return { nome: a.titulo, dados: s.map(x => x.gasto), cor: cor(a.cor) };
+    });
+    const dias = recorteMeta(meta.contas?.novos?.serie, base, d0, d1).map(x => x.data);
 
     desenhar('g-geral', ctx => new Chart(ctx, {
       type: 'line',
@@ -164,30 +135,33 @@
         datasets: series.map(s => ({
           label: s.nome, data: s.dados,
           borderColor: s.cor, backgroundColor: 'transparent',
-          borderWidth: 2, tension: .3, pointRadius: 0, pointHoverRadius: 5,
+          borderWidth: 2, cubicInterpolationMode: 'monotone',
+          pointRadius: 0, pointHoverRadius: 5,
           pointHoverBackgroundColor: s.cor,
           pointHoverBorderColor: cor('surface-1'), pointHoverBorderWidth: 2,
         })),
       },
       options: {
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { position: 'bottom', align: 'start' } },
-        scales: { x: eixoX(), y: eixoY() },
+        plugins: {
+          legend: { position: 'bottom', align: 'start' },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmt.moeda(c.parsed.y)}` } },
+        },
+        scales: { x: eixoX(), y: eixoY({ ticks: { callback: v => fmt.moedaCurta(v), padding: 8, maxTicksLimit: 6 } }) },
       },
     }));
 
     // legenda textual redundante (identidade nunca so pela cor)
     document.getElementById('legenda-geral').innerHTML = series.map(s => {
       const tot = s.dados.reduce((a, b) => a + b, 0);
-      return `<span><i style="background:${s.cor}"></i>${s.nome} — ${fmt.int(tot)} leads</span>`;
+      return `<span><i style="background:${s.cor}"></i>${s.nome} — ${fmt.moedaCurta(tot)}</span>`;
     }).join('');
-
   }
 
   iniciarPeriodo((novo, faixa) => { periodo = novo; custom = faixa; pintar(); }, {
-    min: kommo.inicio,
+    min: base,
     max: isoLocal(new Date()),
-    padraoDe: isoDoDia(intervalo('30d', kommo.inicio, null)[0], kommo.inicio),
+    padraoDe: isoDoDia(intervalo('30d', base, null)[0], base),
   });
   document.addEventListener('tema-mudou', () => setTimeout(pintar, 40));
   pintar();

@@ -7,45 +7,55 @@ async function montarPagina(cfg) {
   iniciarTema();
 
   const [kommo, meta, manual] = await Promise.all([
-    carregarJSON('data/kommo.json'),
+    CRM_ATIVO ? carregarJSON('data/kommo.json') : null,
     carregarJSON('data/meta.json'),
-    carregarJSON('data/manual.json'),
+    CRM_ATIVO ? carregarJSON('data/manual.json') : null,
   ]);
 
-  if (!kommo) {
+  if (!meta || (CRM_ATIVO && !kommo)) {
     document.getElementById('conteudo').innerHTML =
-      '<div class="aviso grave"><span class="aviso-icone">⚠</span><div>Não consegui carregar <b>data/kommo.json</b>. Se você abriu o arquivo direto do disco, use um servidor local — o navegador bloqueia <code>fetch</code> em <code>file://</code>.</div></div>';
+      '<div class="aviso grave"><span class="aviso-icone">⚠</span><div>Não consegui carregar os dados em <b>data/</b>. Se você abriu o arquivo direto do disco, use um servidor local — o navegador bloqueia <code>fetch</code> em <code>file://</code>.</div></div>';
     return;
   }
 
-  const regs = kommo.leads[cfg.pipeline] || [];
+  if (!CRM_ATIVO) desativarAbaCRM();
+  // base dos indices de dia: o CRM quando ativo, senao o primeiro dia de midia
+  const base = CRM_ATIVO ? kommo.inicio : inicioMeta(meta);
+
+  const regs = kommo?.leads?.[cfg.pipeline] || [];
   const vendasManuais = manual?.vendas?.[cfg.pipeline] || [];
-  const etapas = kommo.etapas[cfg.pipeline] || [];
+  const etapas = kommo?.etapas?.[cfg.pipeline] || [];
   const conta = meta?.contas?.[cfg.conta] || null;
   const metaParcial = meta?.fonte !== 'api';
+  const rot_m = rotulosMetrica(conta);
 
   document.querySelectorAll('.js-atualizado').forEach(el => {
-    el.textContent = 'CRM atualizado em ' + kommo.atualizado_em;
+    el.textContent = CRM_ATIVO
+      ? 'CRM atualizado em ' + kommo.atualizado_em
+      : 'Mídia atualizada em ' + meta.atualizado_em;
   });
+  avisoDefasagem(kommo, meta);
 
   let periodo = '30d';
   let custom = null;
   let d0 = 0, d1 = 0;
 
   function pintar() {
-    [d0, d1] = intervalo(periodo, kommo.inicio, custom);
-    const p = agregar(regs, etapas, kommo.dic, d0, d1);
+    [d0, d1] = intervalo(periodo, base, custom);
     const rot = rotuloPeriodo(periodo, custom);
-    const m = midiaDoIntervalo(conta, periodo, kommo.inicio, d0, d1);
+    const m = midiaDoIntervalo(conta, periodo, base, d0, d1);
 
     document.querySelectorAll('.js-periodo').forEach(el => { el.textContent = rot; });
 
-    // vendas informadas a mao dentro do intervalo — nunca somadas ao CRM
-    const de = isoDoDia(d0, kommo.inicio), ate = isoDoDia(d1, kommo.inicio);
-    p.manuais = vendasManuais.filter(v => v.data >= de && v.data <= ate);
+    if (CRM_ATIVO) {
+      const p = agregar(regs, etapas, kommo.dic, d0, d1);
+      // vendas informadas a mao dentro do intervalo — nunca somadas ao CRM
+      const de = isoDoDia(d0, base), ate = isoDoDia(d1, base);
+      p.manuais = vendasManuais.filter(v => v.data >= de && v.data <= ate);
+      pintarComercial(p, rot);
+    }
 
-    pintarComercial(p, rot);
-    pintarMidia(m, p, rot);
+    pintarMidia(m, rot);
     document.dispatchEvent(new CustomEvent('redesenhar'));
   }
 
@@ -53,9 +63,11 @@ async function montarPagina(cfg) {
   function pintarComercial(p, rot) {
     const semVenda = p.ganhos === 0 && p.total > 0;
 
-    // Areas onde a venda nao e fechada no Kommo escondem Ganhos e Receita:
-    // os dois sairiam zerados e so competiriam com o card de vendas informadas.
-    const mostraGanhoCRM = !cfg.vendaForaDoCRM;
+    // Areas onde a venda normalmente nao e fechada no Kommo escondem Ganhos e
+    // Receita, que sairiam zerados competindo com o card de vendas informadas.
+    // Mas se o funil REGISTRAR uma venda no periodo, ela aparece — esconder um
+    // ganho real seria pior que mostrar um zero.
+    const mostraGanhoCRM = !cfg.vendaForaDoCRM || p.ganhos > 0;
 
     document.getElementById('kpis-comercial').innerHTML = [
       kpi({ rotulo: 'Leads recebidos', valor: fmt.int(p.total), nota: rot }),
@@ -78,7 +90,7 @@ async function montarPagina(cfg) {
         rotulo: 'Vendas informadas',
         valor: fmt.int(p.manuais.length),
         nota: 'fora do CRM — informado pela equipe',
-      })] : (cfg.vendaForaDoCRM ? [kpi({
+      })] : (cfg.vendaForaDoCRM && !p.ganhos ? [kpi({
         rotulo: 'Vendas informadas', valor: '0',
         nota: 'nenhuma informada neste período',
       })] : [])),
@@ -186,7 +198,7 @@ async function montarPagina(cfg) {
   }
 
   /* ====================== ABA MIDIA ====================== */
-  function pintarMidia(m, p, rot) {
+  function pintarMidia(m, rot) {
     const box = document.getElementById('midia-conteudo');
     const alerta = document.getElementById('alerta-midia');
 
@@ -218,15 +230,15 @@ async function montarPagina(cfg) {
           <div class="tela"><canvas id="g-gasto-dia"></canvas></div>
         </div>
         <div class="card meio">
-          <h3>Resultados por dia</h3>
-          <p class="dica">Conversas iniciadas no WhatsApp e leads de formulário.</p>
+          <h3>${rot_m.plural} por dia</h3>
+          <p class="dica">${rot_m.nota[0].toUpperCase() + rot_m.nota.slice(1)}, <span class="js-periodo">${rot}</span>.</p>
           <div class="tela"><canvas id="g-result-dia"></canvas></div>
         </div>
         <div class="card">
           <h3>Campanhas</h3>
           <p class="dica">${m.detalheAproximado
             ? 'O Meta só entrega o detalhe por campanha em janelas fixas — a tabela abaixo é a dos últimos 30 dias, não do intervalo escolhido.'
-            : 'Ordenado por investimento. CPR = custo por resultado.'}</p>
+            : `Ordenado por investimento. ${rot_m.custoCurto} = ${rot_m.custo.toLowerCase()}.`}</p>
           <div id="t-campanhas"></div>
         </div>
         <div class="card">
@@ -236,39 +248,30 @@ async function montarPagina(cfg) {
         </div>
       </div>`;
 
-    const cpl = p.total ? m.gasto / p.total : 0;
-    // sem venda no CRM, o CAC sai das vendas informadas pela equipe — e o card
-    // diz de onde veio, para ninguem confundir com dado do funil
-    const vendas = p.ganhos || p.manuais?.length || 0;
-    const vendaManual = !p.ganhos && p.manuais?.length;
-    const cac = vendas ? m.gasto / vendas : 0;
-
     document.getElementById('kpis-midia').innerHTML = [
       kpi({ rotulo: 'Investimento', valor: fmt.moedaCurta(m.gasto), nota: rot }),
       kpi({
-        rotulo: 'Resultados', valor: fmt.int(m.resultados),
-        nota: m.resultados_parciais ? 'leitura parcial' : 'conversas + formulários',
+        rotulo: rot_m.plural, valor: fmt.int(m.resultados),
+        nota: m.resultados_parciais ? 'leitura parcial' : rot_m.nota,
         tom: m.resultados_parciais ? 'ruim' : null,
       }),
       kpi({
-        rotulo: 'Custo por resultado',
+        rotulo: rot_m.custo,
         valor: m.resultados_parciais || !m.resultados ? '—' : fmt.moeda(m.cpr),
         nota: m.resultados_parciais ? 'aguardando leitura completa' : 'no Meta',
       }),
-      kpi({ rotulo: 'CPL no CRM', valor: p.total ? fmt.moeda(cpl) : '—', nota: `${fmt.int(p.total)} leads no Kommo` }),
       kpi({
-        rotulo: 'CAC', valor: vendas ? fmt.moeda(cac) : '—',
-        nota: vendas
-          ? `${fmt.int(vendas)} venda${vendas > 1 ? 's' : ''}${vendaManual ? ' informada' + (vendas > 1 ? 's' : '') + ' fora do CRM' : ''}`
-          : 'sem venda registrada',
-        tom: vendaManual ? 'ruim' : null,
+        rotulo: m.detalheAproximado ? 'Impressões' : 'Alcance',
+        valor: fmt.int(m.detalheAproximado ? m.impressoes : m.alcance),
+        nota: m.detalheAproximado
+          ? 'alcance não é somável entre dias'
+          : fmt.int(m.impressoes) + ' impressões',
       }),
-      kpi({ rotulo: 'Alcance', valor: fmt.int(m.alcance), nota: fmt.int(m.impressoes) + ' impressões' }),
       kpi({ rotulo: 'CTR', valor: fmt.pct(m.ctr), nota: fmt.int(m.cliques) + ' cliques' }),
       kpi({ rotulo: 'CPM', valor: fmt.moeda(m.cpm), nota: 'CPC ' + fmt.moeda(m.cpc) }),
     ].join('');
 
-    const s = recorteMeta(conta.serie, kommo.inicio, d0, d1);
+    const s = recorteMeta(conta.serie, base, d0, d1);
     if (s.length) {
       desenhar('g-gasto-dia', ctx => new Chart(ctx, {
         type: 'bar',
@@ -292,9 +295,10 @@ async function montarPagina(cfg) {
         data: {
           labels: s.map(d => fmt.data(d.data)),
           datasets: [{
-            label: 'Resultados', data: s.map(d => d.resultados),
+            label: rot_m.plural, data: s.map(d => d.resultados),
             borderColor: cor('series-3'), backgroundColor: 'transparent',
-            borderWidth: 2, tension: .3, pointRadius: 0, pointHoverRadius: 5,
+            // monotone: com numeros baixos a curva suave descia abaixo de zero
+            borderWidth: 2, cubicInterpolationMode: 'monotone', pointRadius: 0, pointHoverRadius: 5,
             pointHoverBackgroundColor: cor('series-3'),
             pointHoverBorderColor: cor('surface-1'), pointHoverBorderWidth: 2,
           }],
@@ -302,7 +306,7 @@ async function montarPagina(cfg) {
         options: {
           interaction: { mode: 'index', intersect: false },
           plugins: { legend: { display: false } },
-          scales: { x: eixoX(), y: eixoY() },
+          scales: { x: eixoX(), y: eixoY({ ticks: { precision: 0, padding: 8, maxTicksLimit: 6 } }) },
         },
       }));
     } else {
@@ -319,17 +323,18 @@ async function montarPagina(cfg) {
       { titulo: 'Cliques', valor: l => fmt.int(l.cliques) },
       { titulo: 'CTR', valor: l => fmt.pct(l.ctr) },
       { titulo: 'CPM', valor: l => fmt.moeda(l.cpm) },
-      { titulo: 'Result.', valor: l => l.resultado_confirmado === false ? '—' : fmt.int(l.resultados) },
-      { titulo: 'CPR', valor: l => l.resultado_confirmado === false || !l.resultados ? '—' : fmt.moeda(l.cpr) },
+      { titulo: rot_m.curto, valor: l => l.resultado_confirmado === false ? '—' : fmt.int(l.resultados) },
+      { titulo: rot_m.custoCurto, valor: l => l.resultado_confirmado === false || !l.resultados ? '—' : fmt.moeda(l.cpr) },
     ]);
 
     montarPrevia();
+    const arte = id => conta?.criativos?.[id] || {};
     renderTabela(document.getElementById('t-anuncios'), m.anuncios, [
       {
-        titulo: 'Criativo', valor: l => l.thumb
+        titulo: 'Criativo', valor: l => arte(l.id).thumb
           ? `<div class="criativo">
-               <span class="criativo-mini" data-previa="${l.previa || l.thumb}" tabindex="0" role="button" aria-label="Ver prévia de ${l.nome}">
-                 <img class="miniatura" src="${l.thumb}" alt="" loading="lazy">
+               <span class="criativo-mini" data-previa="${arte(l.id).previa || arte(l.id).thumb}" tabindex="0" role="button" aria-label="Ver prévia de ${l.nome}">
+                 <img class="miniatura" src="${arte(l.id).thumb}" alt="" loading="lazy">
                  <span class="criativo-olho" aria-hidden="true">&#128065;</span>
                </span>
                <span>${l.nome}</span>
@@ -339,16 +344,16 @@ async function montarPagina(cfg) {
       { titulo: 'Investido', valor: l => fmt.moeda(l.gasto) },
       { titulo: 'Impressões', valor: l => fmt.int(l.impressoes) },
       { titulo: 'CTR', valor: l => fmt.pct(l.ctr) },
-      { titulo: 'Result.', valor: l => l.resultado_confirmado === false ? '—' : fmt.int(l.resultados) },
-      { titulo: 'CPR', valor: l => l.resultado_confirmado === false || !l.resultados ? '—' : fmt.moeda(l.cpr) },
+      { titulo: rot_m.curto, valor: l => l.resultado_confirmado === false ? '—' : fmt.int(l.resultados) },
+      { titulo: rot_m.custoCurto, valor: l => l.resultado_confirmado === false || !l.resultados ? '—' : fmt.moeda(l.cpr) },
     ]);
   }
 
   iniciarAbas(() => document.dispatchEvent(new CustomEvent('redesenhar')));
   iniciarPeriodo((novo, faixa) => { periodo = novo; custom = faixa; pintar(); }, {
-    min: kommo.inicio,
+    min: base,
     max: isoLocal(new Date()),
-    padraoDe: isoDoDia(intervalo('30d', kommo.inicio, null)[0], kommo.inicio),
+    padraoDe: isoDoDia(intervalo('30d', base, null)[0], base),
   });
   document.addEventListener('redesenhar', () => {
     // Chart.js precisa remedir quando o painel sai de hidden

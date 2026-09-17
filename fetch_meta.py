@@ -25,12 +25,20 @@ CONTAS = {
 }
 
 # acoes que contam como "resultado" para a Taiyo (CTWA + formulario)
+# So `lead` para formulario: a API devolve o MESMO lead tambem como
+# onsite_conversion.lead_grouped (e variantes offsite_*_add_meta_leads). Somar
+# os dois dobrava os leads de formulario.
 ACOES_LEAD = {
     "onsite_conversion.messaging_conversation_started_7d": "conversas",
-    "onsite_conversion.lead_grouped": "leads_form",
     "lead": "leads_form",
-    "leadgen_grouped": "leads_form",
 }
+
+# O que conta como resultado em cada conta. Novos mede so formulario (lead);
+# as demais somam conversa iniciada no WhatsApp e formulario.
+ACOES_POR_CONTA = {
+    "novos": {"lead": "leads_form"},
+}
+METRICA_POR_CONTA = {"novos": "leads"}
 
 CAMPOS = ",".join([
     "campaign_id", "campaign_name", "adset_name", "ad_id", "ad_name",
@@ -39,17 +47,32 @@ CAMPOS = ",".join([
 ])
 
 
-def http_get(url, tentativas=4):
+# Codigos de erro do Meta que passam com o tempo: limite de chamadas (4, 17,
+# 32, 613, 80000-80014) e indisponibilidade temporaria (1, 2). Chegam como
+# HTTP 400/403, nao 429, entao o status HTTP sozinho nao serve para decidir.
+ERROS_PASSAGEIROS = {1, 2, 4, 17, 32, 341, 613} | set(range(80000, 80015))
+
+
+def http_get(url, tentativas=6):
     for i in range(tentativas):
         try:
             with urllib.request.urlopen(url, timeout=90) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
-            corpo = e.read().decode("utf-8", "replace")[:400]
-            if e.code in (429, 500, 502, 503) and i < tentativas - 1:
-                time.sleep(3 * (i + 1))
+            corpo = e.read().decode("utf-8", "replace")
+            try:
+                erro = json.loads(corpo).get("error", {})
+            except ValueError:
+                erro = {}
+            passageiro = (e.code in (429, 500, 502, 503)
+                          or erro.get("code") in ERROS_PASSAGEIROS
+                          or erro.get("is_transient"))
+            if passageiro and i < tentativas - 1:
+                espera = 30 * (2 ** i)          # 30s, 1min, 2min, 4min, 8min
+                print(f"    [aguardando {espera}s] Meta: {erro.get('message', e.code)}")
+                time.sleep(espera)
                 continue
-            raise RuntimeError(f"Meta API {e.code}: {corpo}")
+            raise RuntimeError(f"Meta API {e.code}: {corpo[:400]}")
         except (urllib.error.URLError, TimeoutError):
             if i < tentativas - 1:
                 time.sleep(3 * (i + 1))
@@ -82,11 +105,11 @@ def insights(conta, nivel, desde, ate, time_increment=None, limite=500):
     return linhas
 
 
-def extrai_acoes(linha):
+def extrai_acoes(linha, acoes=ACOES_LEAD):
     """Soma conversas iniciadas e leads de formulario de uma linha de insights."""
     out = {"conversas": 0, "leads_form": 0}
     for a in (linha.get("actions") or []):
-        alvo = ACOES_LEAD.get(a.get("action_type"))
+        alvo = acoes.get(a.get("action_type"))
         if alvo:
             try:
                 out[alvo] += int(float(a.get("value", 0)))
@@ -102,7 +125,7 @@ def num(v):
         return 0.0
 
 
-def resume(linhas):
+def resume(linhas, acoes=ACOES_LEAD):
     """Agrega uma lista de linhas de insights em um bloco de KPIs."""
     gasto = sum(num(l.get("spend")) for l in linhas)
     impressoes = sum(num(l.get("impressions")) for l in linhas)
@@ -110,7 +133,7 @@ def resume(linhas):
     cliques = sum(num(l.get("clicks")) for l in linhas)
     conversas = leads_form = 0
     for l in linhas:
-        a = extrai_acoes(l)
+        a = extrai_acoes(l, acoes)
         conversas += a["conversas"]
         leads_form += a["leads_form"]
     resultados = conversas + leads_form
@@ -129,13 +152,13 @@ def resume(linhas):
     }
 
 
-def ranking(linhas, chave_id, chave_nome, n=12):
+def ranking(linhas, chave_id, chave_nome, n=12, acoes=ACOES_LEAD):
     grupos = collections.defaultdict(list)
     for l in linhas:
         grupos[(l.get(chave_id), l.get(chave_nome))].append(l)
     itens = []
     for (ident, nome), ls in grupos.items():
-        r = resume(ls)
+        r = resume(ls, acoes)
         if r["gasto"] <= 0:
             continue
         r["id"] = ident
@@ -196,10 +219,13 @@ def main():
 
     agora = datetime.now(BRT)
     hoje = agora.strftime("%Y-%m-%d")
+    # "N dias" = hoje e os N-1 anteriores, igual ao corte do CRM no navegador.
+    # Antes era hoje-N, que cobria N+1 dias e deixava o CPL com gasto de 8 dias
+    # dividido por leads de 7.
     janelas = {
-        "7d": (agora - timedelta(days=7)).strftime("%Y-%m-%d"),
-        "30d": (agora - timedelta(days=30)).strftime("%Y-%m-%d"),
-        "90d": (agora - timedelta(days=90)).strftime("%Y-%m-%d"),
+        "7d": (agora - timedelta(days=6)).strftime("%Y-%m-%d"),
+        "30d": (agora - timedelta(days=29)).strftime("%Y-%m-%d"),
+        "90d": (agora - timedelta(days=89)).strftime("%Y-%m-%d"),
         "mes": agora.replace(day=1).strftime("%Y-%m-%d"),
     }
     inicio_serie = (agora - timedelta(days=180)).strftime("%Y-%m-%d")
@@ -210,15 +236,25 @@ def main():
         "contas": {},
     }
 
+    # Coleta anterior: se uma conta falhar, ela e mantida inteira em vez de
+    # ser sobrescrita por um bloco pela metade.
+    try:
+        with open("data/meta.json", encoding="utf-8") as f:
+            anterior = json.load(f).get("contas", {})
+    except (OSError, ValueError):
+        anterior = {}
+
     for chave, conta in CONTAS.items():
         print(f"Conta {chave} ({conta})...")
-        bloco = {"id": conta, "periodos": {}, "serie": [], "erro": None}
+        acoes = ACOES_POR_CONTA.get(chave, ACOES_LEAD)
+        bloco = {"id": conta, "periodos": {}, "serie": [], "erro": None,
+                 "metrica": METRICA_POR_CONTA.get(chave, "resultados")}
         try:
             # serie diaria (180d, nivel conta)
             diario = insights(conta, "account", inicio_serie, hoje, time_increment="1")
             serie = []
             for l in diario:
-                a = extrai_acoes(l)
+                a = extrai_acoes(l, acoes)
                 serie.append({
                     "data": l.get("date_start"),
                     "gasto": round(num(l.get("spend")), 2),
@@ -231,23 +267,37 @@ def main():
             for nome, desde in janelas.items():
                 camp = insights(conta, "campaign", desde, hoje)
                 ads = insights(conta, "ad", desde, hoje)
-                p = resume(camp)
-                p["campanhas"] = ranking(camp, "campaign_id", "campaign_name")
-                p["anuncios"] = ranking(ads, "ad_id", "ad_name", n=12)
+                # KPIs do periodo vem do nivel CONTA. Somar campanhas inflava o
+                # alcance (a mesma pessoa conta em varias campanhas) e perdia o
+                # gasto de campanhas excluidas.
+                p = resume(insights(conta, "account", desde, hoje), acoes)
+                p["campanhas"] = ranking(camp, "campaign_id", "campaign_name", acoes=acoes)
+                p["anuncios"] = ranking(ads, "ad_id", "ad_name", n=12, acoes=acoes)
                 bloco["periodos"][nome] = p
                 print(f"  {nome}: R$ {p['gasto']:,.2f} | {p['resultados']} resultados | CPR R$ {p['cpr']:,.2f}")
 
-            # miniaturas dos criativos do periodo de 30d
-            top_ads = [a["id"] for a in bloco["periodos"]["30d"]["anuncios"]]
-            imagens = thumbs(top_ads)
-            for a in bloco["periodos"]["30d"]["anuncios"]:
-                par = imagens.get(a["id"])
-                if par:
-                    a["thumb"], a["previa"] = par
+            # Um mapa unico de criativos por conta, cobrindo os anuncios de
+            # TODOS os periodos. Antes as imagens ficavam so dentro do bloco de
+            # 30 dias, entao mudar o filtro fazia as miniaturas sumirem.
+            ids = []
+            for per in bloco["periodos"].values():
+                for a in per["anuncios"]:
+                    if a["id"] not in ids:
+                        ids.append(a["id"])
+            bloco["criativos"] = {
+                ad: {"thumb": par[0], "previa": par[1]}
+                for ad, par in thumbs(ids).items()
+            }
 
         except Exception as e:  # noqa: BLE001 — uma conta nao pode derrubar a outra
-            bloco["erro"] = str(e)[:300]
             print(f"  [erro] {e}")
+            completo = all(k in (anterior.get(chave, {}).get("periodos") or {})
+                           for k in janelas)
+            if completo:
+                bloco = anterior[chave]
+                print("  mantendo a coleta anterior desta conta")
+            else:
+                bloco["erro"] = str(e)[:300]
 
         saida["contas"][chave] = bloco
 
